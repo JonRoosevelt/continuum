@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use continuum_core::{ClipboardItem, DeviceId};
-use continuum_net::{Identity, Message, Peer};
+use continuum_net::{device_id_from_public, Identity, Message, Peer};
 
 use crate::config::Config;
 
@@ -17,6 +17,7 @@ pub fn broadcast(registry: &Registry, item: &ClipboardItem) {
         return;
     };
     let peers = registry.lock().expect("registry mutex");
+    tracing::debug!(peers = peers.len(), "broadcasting clipboard");
     for sender in peers.values() {
         let _ = sender.send(bytes.clone());
     }
@@ -64,6 +65,11 @@ where
             tracing::warn!(name = %peer.name, "invalid public key in config; skipping peer");
             continue;
         };
+        // Deterministic dial tie-break: only the larger DeviceId dials, so two configured
+        // peers form a single connection instead of two overlapping ones.
+        if identity.device_id() <= device_id_from_public(&key) {
+            continue;
+        }
         let address = peer.address.clone();
         let name = peer.name.clone();
         let registry = Arc::clone(&registry);
@@ -101,15 +107,18 @@ fn run_peer(
         .lock()
         .expect("registry mutex")
         .insert(device_id, sender);
+    tracing::info!(device = %device_id.short(), "peer registered");
 
     let result = peer.run(receiver, |message| {
         if let Message::Clipboard(item) = message {
+            tracing::debug!(from = %item.origin.short(), "received clipboard message");
             on_remote(*item);
         }
     });
 
     registry.lock().expect("registry mutex").remove(&device_id);
-    if let Err(err) = result {
-        tracing::debug!(device = %device_id.short(), %err, "peer loop ended");
+    match &result {
+        Ok(()) => tracing::info!(device = %device_id.short(), "peer loop ended"),
+        Err(err) => tracing::info!(device = %device_id.short(), %err, "peer loop ended with error"),
     }
 }

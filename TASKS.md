@@ -19,7 +19,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 - [x] macOS 15.4+ pasteboard-privacy handling: detect `accessBehavior`, surface guidance to System Settings
 - [x] Linux X11/XWayland capture: `x11rb` selection ConvertSelection + property read (compile-checked only; XFixes event watch not yet wired)
 - [x] Linux X11/XWayland inject: become selection owner, serve requests (inline; INCR not implemented)
-- [x] Linux Wayland capture/inject: `wl-clipboard-rs`, `ext-data-control`/`wlr-data-control` via the crate
+- [x] Linux Wayland capture/inject: `wl-clipboard-rs` (runtime-verified on omarchy / Hyprland)
 - [x] Sensitive-type filtering: NSPasteboard.org concealed/transient/auto-generated, `com.apple.is-remote-clipboard`, `x-kde-passwordManagerHint` — default deny
 
 ## Phase 1 — deferred / tech debt
@@ -62,9 +62,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 
 ## Phase 6 — Validation
 
-- [ ] End-to-end test macOS ⇄ Linux: text, rich text, image, multi-item, large payload
+- [x] End-to-end macOS ⇄ Linux (omarchy / Hyprland over Tailscale): plain text verified both directions
+- [ ] Remaining E2E formats: rich text, image, multi-item, large payload
 - [ ] Latency benchmark harness (detect → write) and idle CPU/memory profiling
 - [ ] Two-device conflict + echo-loop regression tests
+- [ ] Runtime-verify the Linux X11 backend (only Wayland exercised so far)
 
 ## Later (post-v1)
 
