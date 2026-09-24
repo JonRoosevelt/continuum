@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Continuum
+Comment=Clipboard sync between macOS and Linux
+Exec=continuum
+Terminal=false
+X-GNOME-Autostart-enabled=true

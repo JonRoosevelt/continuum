@@ -1,0 +1,12 @@
+[Unit]
+Description=Continuum clipboard sync
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/continuum --headless
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

@@ -10,7 +10,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 - [x] Init git repo, Cargo workspace layout (`crates/`: `continuum-core`, `continuum-platform`, `continuum-net`, `continuum-app`), `.gitignore`, rustfmt/clippy config
 - [x] Define `ClipboardItem` model: multi-item, MIME/UTI map, BLAKE3 content hash, origin id, Lamport timestamp
 - [x] Tray skeleton (`tray-icon` + `muda`) with placeholder menu and accessory (no-Dock) activation policy; real `.app`/`LSUIElement` bundle deferred to Phase 5
-- [ ] NOTE: `tray-icon` 0.24 has no `ksni` backend — Linux path is GTK + libappindicator/appindicator. Decide Linux tray backend (tray-icon w/ GTK vs. direct `ksni`) before Phase 4.
+- [x] NOTE: `tray-icon` 0.24 has no `ksni` backend — Linux tray is GTK + libappindicator. Decision: keep it behind the default `tray` feature and ship a headless build + CLI for Linux/GNOME.
 
 ## Phase 1 — Clipboard platform layer
 
@@ -49,16 +49,20 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 
 ## Phase 4 — Pairing + tray UX
 
-- [ ] Pairing flow: short code / QR (SPAKE2) → exchange + pin static keys; explicit revoke; re-pair on key change
-- [ ] Tray menu: status, pause sync, pair device, send clipboard now, quit
-- [ ] Config file + CLI fallback for headless / GNOME-without-extension operation
+- [x] Pairing flow: Noise XX + 6-digit SAS on both devices (`continuum pair` / `pair-listen`); keys pinned to config (verified locally)
+- [x] Tray menu: live status, pause sync, send clipboard now, pair (hint), quit
+- [x] Config file + CLI fallback for headless / GNOME: `show-id`, `status`, `peer add/list`, `pair`, `pair-listen`
+- [ ] Revoke a paired device from the CLI; re-pair-on-key-change prompt
 
 ## Phase 5 — Packaging + release
 
-- [ ] macOS: signed + notarized `.app`, Hardened Runtime, `SMAppService` login item, Homebrew cask
-- [ ] Linux: systemd user unit + `.desktop` autostart, `.deb`/`.rpm`/AppImage/AUR (no Flatpak/Snap)
-- [ ] CI release matrix (`dist`) building on `macos-latest` + `ubuntu-latest`
-- [ ] Docs: README, threat model, crypto spec, GNOME-Wayland limitation note
+- [x] macOS: `.app` bundle script with `LSUIElement`, ad-hoc signed (verified); launch agent via `install-service`
+- [x] Linux: systemd user unit via `install-service` + autostart `.desktop` template
+- [x] Docs: README with usage, config, security/crypto, platform notes
+- [x] CI: fmt + clippy + test workflow on macOS and Linux
+- [ ] macOS: Developer ID signing + notarization, Hardened Runtime, `SMAppService`, Homebrew cask (needs signing cert)
+- [ ] Linux distro packages: `.deb`/`.rpm`/AppImage/AUR (no Flatpak/Snap)
+- [ ] Release artifact matrix (`dist` / GoReleaser-style), auto-update
 
 ## Phase 6 — Validation
 

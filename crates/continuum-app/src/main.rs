@@ -4,6 +4,7 @@ mod gui;
 mod monitor;
 mod net;
 mod pairing;
+mod service;
 #[cfg(feature = "tray")]
 mod tray;
 
@@ -177,6 +178,8 @@ fn main() {
         Some("peer") => exit_on_error(peer_command(&args[1..])),
         Some("pair") => exit_on_error(pair_command(&args[1..])),
         Some("pair-listen") => exit_on_error(pairing::pair_listen()),
+        Some("install-service") => exit_on_error(service::install()),
+        Some("uninstall-service") => exit_on_error(service::uninstall()),
         Some("-h" | "--help") => print_help(),
         Some(other) => {
             eprintln!("unknown command: {other}\n");
@@ -280,6 +283,9 @@ fn print_help() {
          continuum status          show config, listen address and peers\n  \
          continuum peer add <name> <host:port> <public_key_hex>\n  \
          continuum peer list\n  \
+         continuum pair <host>      pair with a device running `pair-listen`\n  \
+         continuum pair-listen      accept a pairing request\n  \
+         continuum install-service / uninstall-service\n  \
          continuum --help"
     );
 }
