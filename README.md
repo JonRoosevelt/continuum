@@ -95,10 +95,17 @@ not implemented. `continuum put` copies stdin to the clipboard (and holds it).
 
 ## Platform notes
 
-- **macOS**: menu-bar-only app (`LSUIElement`). Distribution requires a Developer
-  ID signature and notarization; `scripts/bundle-macos.sh` ad-hoc signs for local
-  use. macOS 15.4+ may ask for pasteboard access — allow Continuum in System
-  Settings if sync stalls.
+- **macOS**: menu-bar-only app (`LSUIElement`). `scripts/bundle-macos.sh` ad-hoc
+  signs for local use; notarization is only needed to distribute a prebuilt app.
+  A downloaded, ad-hoc-signed build is blocked by Gatekeeper — clear the
+  quarantine flag or right-click → Open:
+
+  ```
+  xattr -dr com.apple.quarantine /Applications/Continuum.app
+  ```
+
+  macOS 15.4+ may ask for pasteboard access — allow Continuum in System Settings
+  if sync stalls.
 - **Linux Wayland**: works on compositors exposing data-control (KDE, Sway,
   Hyprland, niri, COSMIC, labwc, …). **GNOME/Mutter does not expose it** — use an
   X11 session or XWayland. The tray needs an AppIndicator extension on GNOME;
