@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use continuum_core::{ClipboardItem, Clock, DeviceId};
+use continuum_core::{ClipItem, ClipboardItem, Clock, DeviceId, Version};
 
 use continuum_platform::backend::{ClipboardBackend, ClipboardError};
 
@@ -25,13 +25,6 @@ impl Monitor {
         })
     }
 
-    #[must_use]
-    #[allow(dead_code)]
-    pub const fn device_id(&self) -> DeviceId {
-        self.device_id
-    }
-
-    /// Polls the clipboard. Returns a stamped item only when new content appeared.
     pub fn poll(&mut self) -> Result<Option<ClipboardItem>, ClipboardError> {
         let Some(items) = self.backend.read()? else {
             return Ok(None);
@@ -41,9 +34,12 @@ impl Monitor {
         Ok(Some(ClipboardItem::new(self.device_id, version, items)?))
     }
 
-    #[allow(dead_code)]
-    pub fn write(&mut self, items: &[continuum_core::ClipItem]) -> Result<(), ClipboardError> {
+    pub fn write(&mut self, items: &[ClipItem]) -> Result<(), ClipboardError> {
         self.backend.write(items)
+    }
+
+    pub fn observe(&mut self, version: Version) {
+        self.clock.observe(version);
     }
 
     #[must_use]

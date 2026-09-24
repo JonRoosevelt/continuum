@@ -8,6 +8,8 @@ pub enum NetError {
     Io(#[from] std::io::Error),
     #[error("frame too large: {0} bytes")]
     FrameTooLarge(u32),
+    #[error("codec error: {0}")]
+    Codec(String),
     #[error("peer presented an unexpected static key")]
     UnknownPeer,
 }

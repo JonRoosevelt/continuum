@@ -30,18 +30,22 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 
 ## Phase 2 — Net + crypto
 
-- [ ] Identity: generate Ed25519 identity + X25519 static key; store in macOS Keychain / libsecret; 0600 key-file fallback
-- [ ] Noise IK session over length-prefixed TCP frames (`snow`), with replay window and periodic rekey
-- [ ] Peer connection manager: one persistent connection per peer, keepalive, exponential backoff with jitter
-- [ ] mDNS discovery (`mdns-sd`, in-process — no Avahi dep) advertising a rotating ephemeral id; manual IP:port fallback
+- [x] Identity: X25519 static keypair, `DeviceId` = BLAKE3(pubkey), persisted 0600 at the config dir
+- [x] Noise IK session over length-prefixed TCP frames (`snow`), with pinned-key peer verification
+- [ ] Peer connection manager: one persistent connection per peer, keepalive, exponential backoff with jitter (wired in Phase 3)
+- [ ] mDNS discovery (`mdns-sd`, in-process — no Avahi dep) advertising a rotating ephemeral id; manual IP:port fallback (manual works today)
+- [ ] OS keychain / libsecret for the identity key (currently 0600 file); periodic rekey
 
 ## Phase 3 — Sync engine
 
-- [ ] Announce-then-fetch protocol: announce {hash, MIME, size, Lamport, origin}, stream bytes on demand
-- [ ] Dedup + echo suppression: content-hash seen-set with TTL, skip own-injected changeCount/generation
-- [ ] Conflict resolution: last-writer-wins with Lamport clock, deterministic device-id tie-break
+- [x] Protocol: `Message::Clipboard(ClipboardItem)` over bincode (inline payload; announce-then-fetch deferred)
+- [x] Dedup + echo suppression: recent-hash set, plus backend change-tracking so our own writes are not re-read
+- [x] Conflict resolution: LWW by `Version` (Lamport counter, device-id tie-break), stale remotes dropped
+- [x] Multi-device fan-out: broadcast on local change to every connected peer; per-peer send queue
 - [ ] Blob streaming/chunking with per-chunk + whole-payload hash verification; inline small text (<64 KiB)
-- [ ] Multi-device mesh fan-out and reconnect catch-up via Lamport state
+- [ ] Reconnect catch-up: current clipboard pulled on (re)connect
+- [x] Peer connection manager: persistent per-peer connection with exponential backoff (keepalive/jitter pending)
+- [x] Headless mode (`--headless`) for servers and testing without a GUI
 
 ## Phase 4 — Pairing + tray UX
 

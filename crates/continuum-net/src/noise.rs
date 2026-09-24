@@ -22,8 +22,21 @@ impl Session {
 
     pub fn recv<S: Read>(&mut self, stream: &mut S) -> Result<Vec<u8>, NetError> {
         let frame = read_frame(stream)?;
+        self.open(&frame)
+    }
+
+    /// Encrypts `payload` into a single transport message (no length prefix).
+    pub fn seal(&mut self, payload: &[u8]) -> Result<Vec<u8>, NetError> {
+        let mut buffer = vec![0u8; payload.len() + TAG_LEN];
+        let written = self.state.write_message(payload, &mut buffer)?;
+        buffer.truncate(written);
+        Ok(buffer)
+    }
+
+    /// Decrypts a single transport message previously produced by [`Session::seal`].
+    pub fn open(&mut self, frame: &[u8]) -> Result<Vec<u8>, NetError> {
         let mut buffer = vec![0u8; frame.len()];
-        let read = self.state.read_message(&frame, &mut buffer)?;
+        let read = self.state.read_message(frame, &mut buffer)?;
         buffer.truncate(read);
         Ok(buffer)
     }
@@ -86,7 +99,7 @@ fn handshake_state(
     }
 }
 
-fn write_frame<S: Write>(stream: &mut S, frame: &[u8]) -> Result<(), NetError> {
+pub(crate) fn write_frame<S: Write>(stream: &mut S, frame: &[u8]) -> Result<(), NetError> {
     let len = u32::try_from(frame.len()).map_err(|_| NetError::FrameTooLarge(u32::MAX))?;
     stream.write_all(&len.to_be_bytes())?;
     stream.write_all(frame)?;

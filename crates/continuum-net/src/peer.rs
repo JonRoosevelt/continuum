@@ -1,11 +1,18 @@
+use std::io::{ErrorKind, Read as _};
 use std::net::{TcpStream, ToSocketAddrs};
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
 
 use continuum_core::DeviceId;
 
 use crate::error::NetError;
 use crate::identity::{device_id_from_public, Identity};
-use crate::noise::{self, Session};
+use crate::noise::{self, write_frame, Session};
+use crate::protocol::Message;
+
+const READ_TIMEOUT: Duration = Duration::from_millis(50);
+const READ_CHUNK: usize = 64 * 1024;
+const MAX_FRAME: u32 = 16 * 1024 * 1024;
 
 pub struct Peer {
     stream: TcpStream,
@@ -73,6 +80,60 @@ impl Peer {
     pub fn device_id(&self) -> DeviceId {
         device_id_from_public(&self.public_key)
     }
+
+    /// Serves a peer connection until it disconnects: flushes queued outbound frames and
+    /// dispatches decoded inbound messages. Uses a short read timeout so a single thread can
+    /// both send and receive without holding up pushes.
+    pub fn run(
+        &mut self,
+        outbound: Receiver<Vec<u8>>,
+        mut on_message: impl FnMut(Message),
+    ) -> Result<(), NetError> {
+        self.stream.set_read_timeout(Some(READ_TIMEOUT))?;
+        let mut buffer: Vec<u8> = Vec::new();
+        let mut chunk = vec![0u8; READ_CHUNK];
+        loop {
+            loop {
+                match outbound.try_recv() {
+                    Ok(payload) => {
+                        let sealed = self.session.seal(&payload)?;
+                        write_frame(&mut self.stream, &sealed)?;
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => return Ok(()),
+                }
+            }
+
+            match self.stream.read(&mut chunk) {
+                Ok(0) => return Ok(()),
+                Ok(n) => buffer.extend_from_slice(&chunk[..n]),
+                Err(err) if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+                Err(err) => return Err(NetError::Io(err)),
+            }
+
+            while let Some(frame) = take_frame(&mut buffer)? {
+                let plain = self.session.open(&frame)?;
+                on_message(Message::decode(&plain)?);
+            }
+        }
+    }
+}
+
+fn take_frame(buffer: &mut Vec<u8>) -> Result<Option<Vec<u8>>, NetError> {
+    if buffer.len() < 4 {
+        return Ok(None);
+    }
+    let len = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]);
+    if len > MAX_FRAME {
+        return Err(NetError::FrameTooLarge(len));
+    }
+    let total = 4 + len as usize;
+    if buffer.len() < total {
+        return Ok(None);
+    }
+    let frame = buffer[4..total].to_vec();
+    buffer.drain(..total);
+    Ok(Some(frame))
 }
 
 #[cfg(test)]
