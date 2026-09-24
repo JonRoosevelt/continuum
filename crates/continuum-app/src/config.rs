@@ -32,11 +32,29 @@ impl Config {
             Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
         } else {
             let config = Self::default();
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::write(path, serde_json::to_string_pretty(&config)?)?;
+            config.save(path)?;
             Ok(config)
+        }
+    }
+
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, serde_json::to_string_pretty(self)?)?;
+        Ok(())
+    }
+
+    /// Adds a peer, replacing any existing entry with the same name or public key.
+    pub fn upsert_peer(&mut self, peer: PeerConfig) {
+        if let Some(existing) = self
+            .peers
+            .iter_mut()
+            .find(|known| known.name == peer.name || known.public_key == peer.public_key)
+        {
+            *existing = peer;
+        } else {
+            self.peers.push(peer);
         }
     }
 }

@@ -48,6 +48,8 @@ pub(crate) struct Core {
     registry: net::Registry,
     recent: Recent,
     last_version: Option<Version>,
+    last_item: Option<ClipboardItem>,
+    paused: bool,
 }
 
 impl Core {
@@ -62,6 +64,8 @@ impl Core {
             registry: net::start(Arc::clone(&identity), config, on_remote)?,
             recent: Recent::new(),
             last_version: None,
+            last_item: None,
+            paused: false,
         })
     }
 
@@ -74,13 +78,20 @@ impl Core {
                     preview = %item.plain_text().map_or_else(|| "<non-text>".into(), preview),
                     "local clipboard changed"
                 );
-                net::broadcast(&self.registry, &item);
+                if !self.paused {
+                    net::broadcast(&self.registry, &item);
+                }
             }
+            self.last_item = Some(item);
         }
         Ok(())
     }
 
     pub(crate) fn apply_remote(&mut self, item: ClipboardItem) {
+        if self.paused {
+            tracing::debug!("sync paused; ignoring remote clipboard");
+            return;
+        }
         if self.last_version.is_some_and(|last| item.version <= last) {
             tracing::debug!(from = %item.origin.short(), "dropped stale remote clipboard");
             return;
@@ -92,6 +103,7 @@ impl Core {
         match self.monitor.write(&item.items) {
             Ok(()) => {
                 self.last_version = Some(item.version);
+                self.last_item = Some(item.clone());
                 tracing::info!(
                     from = %item.origin.short(),
                     preview = %item.plain_text().map_or_else(|| "<non-text>".into(), preview),
@@ -100,6 +112,34 @@ impl Core {
             }
             Err(err) => tracing::warn!(%err, "failed to write remote clipboard"),
         }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn send_now(&self) {
+        match &self.last_item {
+            Some(item) => {
+                tracing::info!(preview = %item.plain_text().map_or_else(|| "<non-text>".into(), preview), "sending clipboard now");
+                net::broadcast(&self.registry, item);
+            }
+            None => tracing::info!("nothing to send yet"),
+        }
+    }
+
+    #[must_use]
+    #[allow(dead_code)]
+    pub(crate) fn peer_count(&self) -> usize {
+        net::peer_count(&self.registry)
+    }
+
+    #[must_use]
+    #[allow(dead_code)]
+    pub(crate) const fn paused(&self) -> bool {
+        self.paused
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn set_paused(&mut self, paused: bool) {
+        self.paused = paused;
     }
 }
 
@@ -127,16 +167,109 @@ pub(crate) fn load() -> anyhow::Result<Loaded> {
 fn main() {
     init_tracing();
 
-    if std::env::args().any(|arg| arg == "--headless") {
-        run_headless_exit();
-        return;
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        None => run_default(),
+        Some("--headless") => run_headless_exit(),
+        Some("show-id") => exit_on_error(show_id()),
+        Some("status") => exit_on_error(show_status()),
+        Some("peer") => exit_on_error(peer_command(&args[1..])),
+        Some("-h" | "--help") => print_help(),
+        Some(other) => {
+            eprintln!("unknown command: {other}\n");
+            print_help();
+            std::process::exit(2);
+        }
     }
+}
 
+fn run_default() {
     #[cfg(feature = "tray")]
     gui::run();
 
     #[cfg(not(feature = "tray"))]
     run_headless_exit();
+}
+
+fn exit_on_error(result: anyhow::Result<()>) {
+    if let Err(err) = result {
+        eprintln!("error: {err}");
+        std::process::exit(1);
+    }
+}
+
+fn show_id() -> anyhow::Result<()> {
+    let identity = load_identity()?;
+    let device = identity.device_id();
+    println!("device id : {device}");
+    println!("short     : {}", device.short());
+    println!("public key: {}", hex::encode(identity.public_key()));
+    Ok(())
+}
+
+fn show_status() -> anyhow::Result<()> {
+    let config_path = config::default_config_path()
+        .ok_or_else(|| anyhow::anyhow!("could not resolve the config directory"))?;
+    let config = config::Config::load_or_create(&config_path)?;
+    let identity = load_identity()?;
+
+    println!("device   : {}", identity.device_id().short());
+    println!("listen   : {}", config.listen);
+    println!("config   : {}", config_path.display());
+    println!("peers    : {}", config.peers.len());
+    for peer in &config.peers {
+        let short: String = peer.public_key.chars().take(16).collect();
+        println!("  - {:<12} {:<24} {short}…", peer.name, peer.address);
+    }
+    Ok(())
+}
+
+fn peer_command(args: &[String]) -> anyhow::Result<()> {
+    match args.first().map(String::as_str) {
+        Some("add") => {
+            let [_, name, address, public_key] = args else {
+                anyhow::bail!(
+                    "usage: continuum peer add <name> <host:port> <public_key_hex> (get it from `continuum show-id`)"
+                );
+            };
+            if hex::decode(public_key)?.len() != 32 {
+                anyhow::bail!("public key must be 32 bytes (64 hex characters)");
+            }
+            let path = config::default_config_path()
+                .ok_or_else(|| anyhow::anyhow!("could not resolve the config directory"))?;
+            let mut config = config::Config::load_or_create(&path)?;
+            config.upsert_peer(config::PeerConfig {
+                name: name.clone(),
+                address: address.clone(),
+                public_key: public_key.clone(),
+            });
+            config.save(&path)?;
+            println!("added peer {name} ({address})");
+            Ok(())
+        }
+        Some("list") | None => show_status(),
+        Some(other) => anyhow::bail!("unknown peer subcommand: {other}"),
+    }
+}
+
+fn load_identity() -> anyhow::Result<Identity> {
+    let path = continuum_net::default_identity_path()
+        .ok_or_else(|| anyhow::anyhow!("could not resolve the config directory"))?;
+    Ok(Identity::load_or_generate(&path)?)
+}
+
+fn print_help() {
+    println!(
+        "Continuum — clipboard sync between macOS and Linux\n\n\
+         USAGE:\n  \
+         continuum                 run the tray app\n  \
+         continuum --headless      run without a GUI\n  \
+         continuum show-id         print this device's id and public key\n  \
+         continuum status          show config, listen address and peers\n  \
+         continuum peer add <name> <host:port> <public_key_hex>\n  \
+         continuum peer list\n  \
+         continuum --help"
+    );
 }
 
 fn run_headless_exit() {

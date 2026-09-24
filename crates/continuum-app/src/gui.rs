@@ -7,7 +7,7 @@ use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tray_icon::menu::MenuEvent;
 use tray_icon::TrayIconEvent;
 
-use crate::tray::TrayApp;
+use crate::tray::{TrayAction, TrayApp};
 use crate::Core;
 
 enum UserEvent {
@@ -67,6 +67,7 @@ pub fn run() {
                     if let Err(err) = app.core.poll() {
                         tracing::warn!(%err, "clipboard poll failed");
                     }
+                    update_status(app);
                 }
             }
             Event::UserEvent(UserEvent::Remote(item)) => {
@@ -76,13 +77,43 @@ pub fn run() {
             }
             Event::UserEvent(UserEvent::Menu(event)) => {
                 if let Some(app) = app.as_mut() {
-                    app.tray.on_menu(event.id(), control_flow);
+                    handle_action(app, app.tray.action(event.id()), control_flow);
                 }
             }
             Event::UserEvent(UserEvent::Tray(_event)) => {}
             _ => {}
         }
     });
+}
+
+fn handle_action(app: &mut App, action: TrayAction, control_flow: &mut ControlFlow) {
+    match action {
+        TrayAction::ToggleSync => {
+            let paused = !app.core.paused();
+            app.core.set_paused(paused);
+            app.tray.set_paused(paused);
+            update_status(app);
+        }
+        TrayAction::SendNow => app.core.send_now(),
+        TrayAction::Pair => {
+            tracing::info!("run `continuum pair <host:port>` on this machine to pair a device")
+        }
+        TrayAction::Quit => *control_flow = ControlFlow::Exit,
+        TrayAction::None => {}
+    }
+}
+
+fn update_status(app: &App) {
+    let peers = app.core.peer_count();
+    let state = if app.core.paused() {
+        "paused"
+    } else if peers == 0 {
+        "no peers"
+    } else {
+        "syncing"
+    };
+    app.tray
+        .set_status(&format!("Continuum — {state} · {peers} peer(s)"));
 }
 
 fn build_app(proxy: &EventLoopProxy<UserEvent>) -> anyhow::Result<App> {

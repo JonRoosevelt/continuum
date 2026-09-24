@@ -11,6 +11,12 @@ use crate::config::Config;
 
 pub type Registry = Arc<Mutex<HashMap<DeviceId, mpsc::Sender<Vec<u8>>>>>;
 
+#[must_use]
+#[allow(dead_code)]
+pub fn peer_count(registry: &Registry) -> usize {
+    registry.lock().expect("registry mutex").len()
+}
+
 pub fn broadcast(registry: &Registry, item: &ClipboardItem) {
     let Ok(bytes) = Message::Clipboard(Box::new(item.clone())).encode() else {
         tracing::warn!("failed to encode clipboard message");

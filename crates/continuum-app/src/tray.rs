@@ -1,17 +1,25 @@
 use tray_icon::menu::{CheckMenuItem, Menu, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
-use tao::event_loop::ControlFlow;
-
 pub const MENU_TOGGLE_SYNC: &str = "toggle-sync";
 pub const MENU_SEND_NOW: &str = "send-now";
 pub const MENU_PAIR: &str = "pair";
 pub const MENU_QUIT: &str = "quit";
+const MENU_STATUS: &str = "status";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrayAction {
+    ToggleSync,
+    SendNow,
+    Pair,
+    Quit,
+    None,
+}
 
 pub struct TrayApp {
     _tray: TrayIcon,
+    status: MenuItem,
     toggle_sync: CheckMenuItem,
-    paused: bool,
     quit_id: MenuId,
     send_id: MenuId,
     pair_id: MenuId,
@@ -20,6 +28,7 @@ pub struct TrayApp {
 
 impl TrayApp {
     pub fn new() -> anyhow::Result<Self> {
+        let status = MenuItem::with_id(MENU_STATUS, "Continuum — starting…", false, None);
         let toggle_sync = CheckMenuItem::with_id(MENU_TOGGLE_SYNC, "Pause sync", true, false, None);
         let send_now = MenuItem::with_id(MENU_SEND_NOW, "Send clipboard now", true, None);
         let pair = MenuItem::with_id(MENU_PAIR, "Pair device…", true, None);
@@ -27,7 +36,7 @@ impl TrayApp {
 
         let menu = Menu::new();
         menu.append_items(&[
-            &MenuItem::with_id("status", "Continuum — idle", false, None),
+            &status,
             &PredefinedMenuItem::separator(),
             &toggle_sync,
             &send_now,
@@ -50,24 +59,32 @@ impl TrayApp {
             send_id: send_now.id().clone(),
             pair_id: pair.id().clone(),
             toggle_id: toggle_sync.id().clone(),
+            status,
             toggle_sync,
-            paused: false,
         })
     }
 
-    pub fn on_menu(&mut self, id: &MenuId, control_flow: &mut ControlFlow) {
+    #[must_use]
+    pub fn action(&self, id: &MenuId) -> TrayAction {
         if id == &self.quit_id {
-            tracing::info!("quit requested");
-            *control_flow = ControlFlow::Exit;
+            TrayAction::Quit
         } else if id == &self.toggle_id {
-            self.paused = !self.paused;
-            self.toggle_sync.set_checked(self.paused);
-            tracing::info!(paused = self.paused, "sync toggled");
+            TrayAction::ToggleSync
         } else if id == &self.send_id {
-            tracing::info!("send clipboard now requested");
+            TrayAction::SendNow
         } else if id == &self.pair_id {
-            tracing::info!("pairing requested (not yet implemented)");
+            TrayAction::Pair
+        } else {
+            TrayAction::None
         }
+    }
+
+    pub fn set_status(&self, text: &str) {
+        self.status.set_text(text);
+    }
+
+    pub fn set_paused(&self, paused: bool) {
+        self.toggle_sync.set_checked(paused);
     }
 }
 
