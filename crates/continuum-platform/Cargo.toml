@@ -19,4 +19,5 @@ objc2-app-kit = { version = "0.3.2", features = ["NSPasteboard", "NSPasteboardIt
 objc2-foundation = { version = "0.3.2", features = ["NSData", "NSArray", "NSString"] }
 
 [target.'cfg(target_os="linux")'.dependencies]
+wl-clipboard-rs = "0.9.3"
 x11rb = "0.14.0"

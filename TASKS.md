@@ -17,10 +17,16 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 - [x] macOS capture: `objc2-app-kit`, adaptive `changeCount` poll (100 ms active → 1 s idle), read all items/types
 - [x] macOS inject: write multi-item pasteboard, record resulting `changeCount` for echo suppression
 - [x] macOS 15.4+ pasteboard-privacy handling: detect `accessBehavior`, surface guidance to System Settings
-- [ ] Linux X11/XWayland capture: `x11rb` XFixes `select_selection_input`, ConvertSelection, INCR for large payloads
-- [ ] Linux X11/XWayland inject: become selection owner, serve requests + INCR
-- [ ] Linux Wayland capture/inject: `wl-clipboard-rs`, `ext-data-control-v1` → `wlr-data-control` v2 fallback
-- [ ] Sensitive-type filtering: NSPasteboard.org concealed/transient/auto-generated, `com.apple.is-remote-clipboard`, `x-kde-passwordManagerHint` — default deny (macOS done; Linux pending)
+- [x] Linux X11/XWayland capture: `x11rb` selection ConvertSelection + property read (compile-checked only; XFixes event watch not yet wired)
+- [x] Linux X11/XWayland inject: become selection owner, serve requests (inline; INCR not implemented)
+- [x] Linux Wayland capture/inject: `wl-clipboard-rs`, `ext-data-control`/`wlr-data-control` via the crate
+- [x] Sensitive-type filtering: NSPasteboard.org concealed/transient/auto-generated, `com.apple.is-remote-clipboard`, `x-kde-passwordManagerHint` — default deny
+
+## Phase 1 — deferred / tech debt
+
+- [ ] X11 INCR large-payload transfer (read and write), currently skipped/inline-only
+- [ ] Event-driven capture: X11 XFixes `select_selection_input` and Wayland data-control offers, replacing content-hash polling
+- [ ] Wayland multi-item semantics (currently all items flattened into one `copy_multi` offer)
 
 ## Phase 2 — Net + crypto
 
