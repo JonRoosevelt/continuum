@@ -1,0 +1,13 @@
+[package]
+name = "continuum-net"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Discovery, transport and crypto for Continuum peers"
+
+[dependencies]
+continuum-core.workspace = true
+
+[lints]
+workspace = true

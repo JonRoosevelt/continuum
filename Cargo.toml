@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/continuum-core",
+    "crates/continuum-platform",
+    "crates/continuum-net",
+    "crates/continuum-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+description = "Tray-only clipboard sync between macOS and Linux over the LAN"
+
+[workspace.dependencies]
+continuum-core = { path = "crates/continuum-core" }
+continuum-platform = { path = "crates/continuum-platform" }
+continuum-net = { path = "crates/continuum-net" }
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

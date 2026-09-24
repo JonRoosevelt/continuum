@@ -1,0 +1,16 @@
+[package]
+name = "continuum-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Core domain types for Continuum: clipboard items, content hashing, logical clocks"
+
+[dependencies]
+blake3 = "1.8.7"
+getrandom = { version = "0.2", features = ["std"] }
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+
+[lints]
+workspace = true
