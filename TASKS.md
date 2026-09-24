@@ -59,11 +59,12 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 ## Phase 5 — Packaging + release
 
 - [x] macOS: `.app` bundle script with `LSUIElement`, ad-hoc signed (verified); launch agent via `install-service`
-- [x] Linux: systemd user unit via `install-service` + autostart `.desktop` template
+- [x] Linux: systemd user unit via `install-service` (installed + verified on omarchy) + autostart `.desktop` template
 - [x] Docs: README with usage, config, security/crypto, platform notes
-- [x] CI: fmt + clippy + test workflow on macOS and Linux
+- [x] CI: fmt + clippy + test workflow on macOS and Linux; tag release workflow (artifact build)
+- [x] Packaging templates: Homebrew cask + Arch PKGBUILD
 - [ ] macOS: Developer ID signing + notarization, Hardened Runtime, `SMAppService`, Homebrew cask (needs signing cert)
-- [ ] Linux distro packages: `.deb`/`.rpm`/AppImage/AUR (no Flatpak/Snap)
+- [ ] Linux distro packages: real `.deb`/`.rpm`/AppImage/AUR from the templates (no Flatpak/Snap)
 - [ ] Release artifact matrix (`dist` / GoReleaser-style), auto-update
 
 ## Phase 6 — Validation
