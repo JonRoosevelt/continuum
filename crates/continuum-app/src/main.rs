@@ -1,28 +1,19 @@
 mod config;
+#[cfg(feature = "tray")]
+mod gui;
 mod monitor;
 mod net;
+#[cfg(feature = "tray")]
 mod tray;
 
 use std::collections::{HashSet, VecDeque};
 use std::sync::{mpsc, Arc};
-use std::time::{Duration, Instant};
 
 use continuum_core::{ClipboardItem, ContentHash, Version};
 use continuum_net::Identity;
 use monitor::Monitor;
-use tao::event::{Event, StartCause};
-use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
-use tray::TrayApp;
-use tray_icon::menu::MenuEvent;
-use tray_icon::TrayIconEvent;
 
 const RECENT_CAPACITY: usize = 256;
-
-enum UserEvent {
-    Menu(MenuEvent),
-    Tray(TrayIconEvent),
-    Remote(ClipboardItem),
-}
 
 struct Recent {
     set: HashSet<ContentHash>,
@@ -52,15 +43,15 @@ impl Recent {
     }
 }
 
-struct Core {
-    monitor: Monitor,
+pub(crate) struct Core {
+    pub(crate) monitor: Monitor,
     registry: net::Registry,
     recent: Recent,
     last_version: Option<Version>,
 }
 
 impl Core {
-    fn new(
+    pub(crate) fn new(
         identity: Arc<Identity>,
         config: &config::Config,
         on_remote: impl Fn(ClipboardItem) + Send + Sync + 'static,
@@ -74,7 +65,7 @@ impl Core {
         })
     }
 
-    fn poll(&mut self) -> anyhow::Result<()> {
+    pub(crate) fn poll(&mut self) -> anyhow::Result<()> {
         if let Some(item) = self.monitor.poll()? {
             self.last_version = Some(item.version);
             if self.recent.insert(item.hash) {
@@ -89,7 +80,7 @@ impl Core {
         Ok(())
     }
 
-    fn apply_remote(&mut self, item: ClipboardItem) {
+    pub(crate) fn apply_remote(&mut self, item: ClipboardItem) {
         if self.last_version.is_some_and(|last| item.version <= last) {
             tracing::debug!(from = %item.origin.short(), "dropped stale remote clipboard");
             return;
@@ -112,17 +103,12 @@ impl Core {
     }
 }
 
-struct App {
-    core: Core,
-    tray: TrayApp,
+pub(crate) struct Loaded {
+    pub(crate) identity: Arc<Identity>,
+    pub(crate) config: config::Config,
 }
 
-struct Loaded {
-    identity: Arc<Identity>,
-    config: config::Config,
-}
-
-fn load() -> anyhow::Result<Loaded> {
+pub(crate) fn load() -> anyhow::Result<Loaded> {
     let identity_path = continuum_net::default_identity_path()
         .ok_or_else(|| anyhow::anyhow!("could not resolve the config directory"))?;
     let identity = Arc::new(Identity::load_or_generate(&identity_path)?);
@@ -142,14 +128,22 @@ fn main() {
     init_tracing();
 
     if std::env::args().any(|arg| arg == "--headless") {
-        if let Err(err) = run_headless() {
-            tracing::error!(%err, "headless runtime failed");
-            std::process::exit(1);
-        }
+        run_headless_exit();
         return;
     }
 
-    run_gui();
+    #[cfg(feature = "tray")]
+    gui::run();
+
+    #[cfg(not(feature = "tray"))]
+    run_headless_exit();
+}
+
+fn run_headless_exit() {
+    if let Err(err) = run_headless() {
+        tracing::error!(%err, "headless runtime failed");
+        std::process::exit(1);
+    }
 }
 
 fn run_headless() -> anyhow::Result<()> {
@@ -168,83 +162,7 @@ fn run_headless() -> anyhow::Result<()> {
     }
 }
 
-fn run_gui() {
-    #[allow(unused_mut)]
-    let mut event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
-
-    #[cfg(target_os = "macos")]
-    {
-        use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
-        event_loop.set_activation_policy(ActivationPolicy::Accessory);
-    }
-
-    let proxy = event_loop.create_proxy();
-    MenuEvent::set_event_handler(Some(move |event| {
-        let _ = proxy.send_event(UserEvent::Menu(event));
-    }));
-    let proxy = event_loop.create_proxy();
-    TrayIconEvent::set_event_handler(Some(move |event| {
-        let _ = proxy.send_event(UserEvent::Tray(event));
-    }));
-    let remote_proxy = event_loop.create_proxy();
-
-    let mut app: Option<App> = None;
-
-    event_loop.run(move |event, _target, control_flow| {
-        *control_flow = ControlFlow::WaitUntil(
-            Instant::now()
-                + app
-                    .as_ref()
-                    .map_or(Duration::from_secs(1), |a| a.core.monitor.next_delay()),
-        );
-
-        match event {
-            Event::NewEvents(StartCause::Init) => match build_gui_app(&remote_proxy) {
-                Ok(created) => {
-                    tracing::info!("continuum started");
-                    app = Some(created);
-                }
-                Err(err) => {
-                    tracing::error!(%err, "failed to start continuum");
-                    *control_flow = ControlFlow::Exit;
-                }
-            },
-            Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
-                if let Some(app) = app.as_mut() {
-                    if let Err(err) = app.core.poll() {
-                        tracing::warn!(%err, "clipboard poll failed");
-                    }
-                }
-            }
-            Event::UserEvent(UserEvent::Remote(item)) => {
-                if let Some(app) = app.as_mut() {
-                    app.core.apply_remote(item);
-                }
-            }
-            Event::UserEvent(UserEvent::Menu(event)) => {
-                if let Some(app) = app.as_mut() {
-                    app.tray.on_menu(event.id(), control_flow);
-                }
-            }
-            Event::UserEvent(UserEvent::Tray(_event)) => {}
-            _ => {}
-        }
-    });
-}
-
-fn build_gui_app(proxy: &EventLoopProxy<UserEvent>) -> anyhow::Result<App> {
-    let loaded = load()?;
-    let proxy = proxy.clone();
-    let core = Core::new(Arc::clone(&loaded.identity), &loaded.config, move |item| {
-        let _ = proxy.send_event(UserEvent::Remote(item));
-    })?;
-    Ok(App {
-        core,
-        tray: TrayApp::new()?,
-    })
-}
-
-fn report_access_behavior() {
+pub(crate) fn report_access_behavior() {
     use continuum_platform::AccessBehavior;
     match continuum_platform::access_behavior() {
         AccessBehavior::AlwaysAllow => {}
@@ -259,7 +177,7 @@ fn report_access_behavior() {
     }
 }
 
-fn preview(text: &str) -> String {
+pub(crate) fn preview(text: &str) -> String {
     const MAX_CHARS: usize = 40;
     let mut truncated: String = text.chars().take(MAX_CHARS).collect();
     if text.chars().count() > MAX_CHARS {
