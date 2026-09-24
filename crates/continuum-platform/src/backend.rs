@@ -1,4 +1,4 @@
-use continuum_core::{ClipItem, CoreError};
+use continuum_core::ClipItem;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClipboardError {
@@ -9,10 +9,19 @@ pub enum ClipboardError {
     #[error("failed to write clipboard: {0}")]
     Write(String),
     #[error(transparent)]
-    Core(#[from] CoreError),
+    Core(#[from] continuum_core::CoreError),
 }
 
 pub trait ClipboardBackend: Send {
-    fn read(&mut self) -> Result<Option<ClipItem>, ClipboardError>;
-    fn write(&mut self, item: &ClipItem) -> Result<(), ClipboardError>;
+    /// Returns `Some` only when the clipboard changed since the previous call.
+    fn read(&mut self) -> Result<Option<Vec<ClipItem>>, ClipboardError>;
+    fn write(&mut self, items: &[ClipItem]) -> Result<(), ClipboardError>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessBehavior {
+    Default,
+    Ask,
+    AlwaysAllow,
+    AlwaysDeny,
 }

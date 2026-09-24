@@ -14,13 +14,13 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 
 ## Phase 1 — Clipboard platform layer
 
-- [ ] macOS capture: `objc2-app-kit`, adaptive `changeCount` poll (100 ms active → 1 s idle), read all items/types
-- [ ] macOS inject: write multi-item pasteboard, record resulting `changeCount` for echo suppression
-- [ ] macOS 15.4+ pasteboard-privacy handling: detect `accessBehavior`, surface guidance to System Settings → always allow
+- [x] macOS capture: `objc2-app-kit`, adaptive `changeCount` poll (100 ms active → 1 s idle), read all items/types
+- [x] macOS inject: write multi-item pasteboard, record resulting `changeCount` for echo suppression
+- [x] macOS 15.4+ pasteboard-privacy handling: detect `accessBehavior`, surface guidance to System Settings
 - [ ] Linux X11/XWayland capture: `x11rb` XFixes `select_selection_input`, ConvertSelection, INCR for large payloads
 - [ ] Linux X11/XWayland inject: become selection owner, serve requests + INCR
 - [ ] Linux Wayland capture/inject: `wl-clipboard-rs`, `ext-data-control-v1` → `wlr-data-control` v2 fallback
-- [ ] Sensitive-type filtering: NSPasteboard.org concealed/transient/auto-generated, `com.apple.is-remote-clipboard`, `x-kde-passwordManagerHint` — default deny
+- [ ] Sensitive-type filtering: NSPasteboard.org concealed/transient/auto-generated, `com.apple.is-remote-clipboard`, `x-kde-passwordManagerHint` — default deny (macOS done; Linux pending)
 
 ## Phase 2 — Net + crypto
 
