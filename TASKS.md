@@ -43,7 +43,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 - [x] Dedup + echo suppression: recent-hash set, plus backend change-tracking so our own writes are not re-read
 - [x] Conflict resolution: LWW by `Version` (Lamport counter, device-id tie-break), stale remotes dropped
 - [x] Multi-device fan-out: broadcast on local change to every connected peer; per-peer send queue
-- [ ] Blob streaming/chunking with per-chunk + whole-payload hash verification; inline small text (<64 KiB)
+- [x] Large payloads: chunked Noise transport (64 KiB message cap) with reassembly; frame cap 64 MiB; oversized sends skipped
+- [x] Multi-item payloads (protcol + macOS roundtrip tests)
 - [x] Reconnect + announce: on peer up the current clipboard is pushed, and clipboard activity wakes parked reconnect loops; offline→online re-pairs and syncs (verified mac↔omarchy)
 - [x] Peer connection manager: persistent per-peer connection with exponential backoff (keepalive/jitter pending)
 - [x] Headless mode (`--headless`) for servers and testing without a GUI
@@ -69,7 +70,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 
 - [x] End-to-end macOS ⇄ Linux (omarchy / Hyprland over Tailscale): plain text verified both directions
 - [x] E2E formats: HTML and PNG images both directions (byte-identical hashes), incl. macOS TIFF->PNG conversion crossing to Linux
-- [ ] Remaining E2E formats: multi-item selection, large payload/X11 INCR
+- [x] E2E large payload (8 MB text both directions, identical hashes)
+- [ ] X11 large payload / INCR (Wayland verified; X11 still inline-only)
 - [ ] Latency benchmark harness (detect → write) and idle CPU/memory profiling
 - [ ] Two-device conflict + echo-loop regression tests
 - [ ] Runtime-verify the Linux X11 backend (only Wayland exercised so far)

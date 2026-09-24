@@ -12,9 +12,11 @@ use crate::protocol::Message;
 
 const READ_TIMEOUT: Duration = Duration::from_millis(50);
 const READ_CHUNK: usize = 64 * 1024;
-const MAX_FRAME: u32 = 16 * 1024 * 1024;
+const MAX_FRAME: u32 = 64 * 1024 * 1024;
 const PING_INTERVAL: Duration = Duration::from_secs(10);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+// Noise caps a single message at 65535 bytes including the 16-byte tag; chunk below that.
+const NOISE_PLAIN_MAX: usize = 60_000;
 
 pub struct Peer {
     stream: TcpStream,
@@ -93,6 +95,7 @@ impl Peer {
     ) -> Result<(), NetError> {
         self.stream.set_read_timeout(Some(READ_TIMEOUT))?;
         let mut buffer: Vec<u8> = Vec::new();
+        let mut reassembly: Vec<u8> = Vec::new();
         let mut chunk = vec![0u8; READ_CHUNK];
         let mut last_ping = Instant::now();
         let mut last_seen = Instant::now();
@@ -122,11 +125,27 @@ impl Peer {
             }
 
             while let Some(frame) = take_frame(&mut buffer)? {
-                let plain = self.session.open(&frame)?;
-                match Message::decode(&plain)? {
-                    Message::Ping => self.write_message(&Message::Pong.encode()?)?,
-                    Message::Pong => {}
-                    other => on_message(other),
+                reassembly.extend_from_slice(&self.session.open(&frame)?);
+                while reassembly.len() >= 4 {
+                    let len = u32::from_be_bytes([
+                        reassembly[0],
+                        reassembly[1],
+                        reassembly[2],
+                        reassembly[3],
+                    ]) as usize;
+                    if len > MAX_FRAME as usize {
+                        return Err(NetError::FrameTooLarge(len as u32));
+                    }
+                    if reassembly.len() < 4 + len {
+                        break;
+                    }
+                    let message = reassembly[4..4 + len].to_vec();
+                    reassembly.drain(..4 + len);
+                    match Message::decode(&message)? {
+                        Message::Ping => self.write_message(&Message::Pong.encode()?)?,
+                        Message::Pong => {}
+                        other => on_message(other),
+                    }
                 }
             }
 
@@ -136,9 +155,17 @@ impl Peer {
         }
     }
 
+    /// Sends one logical message, chunked so no single Noise message exceeds the 64 KiB cap.
     fn write_message(&mut self, payload: &[u8]) -> Result<(), NetError> {
-        let sealed = self.session.seal(payload)?;
-        write_frame(&mut self.stream, &sealed)
+        let mut stream = Vec::with_capacity(4 + payload.len());
+        let len = u32::try_from(payload.len()).map_err(|_| NetError::FrameTooLarge(u32::MAX))?;
+        stream.extend_from_slice(&len.to_be_bytes());
+        stream.extend_from_slice(payload);
+        for chunk in stream.chunks(NOISE_PLAIN_MAX) {
+            let sealed = self.session.seal(chunk)?;
+            write_frame(&mut self.stream, &sealed)?;
+        }
+        Ok(())
     }
 }
 
@@ -208,5 +235,61 @@ mod tests {
 
         let _ = Peer::connect(address, &initiator_id, &responder_public);
         assert!(handle.join().unwrap());
+    }
+
+    #[test]
+    fn transfers_large_payload_across_noise_chunks() {
+        use continuum_core::{ClipItem, ClipboardItem, Representation, Version, PLAIN_TEXT_MIME};
+
+        let responder_id = Identity::generate().unwrap();
+        let initiator_id = Identity::generate().unwrap();
+        let responder_public = responder_id.public_key().to_vec();
+        let initiator_public = initiator_id.public_key().to_vec();
+
+        let big = "a".repeat(200_000);
+        let device = initiator_id.device_id();
+        let item = ClipItem::new(vec![Representation::text(PLAIN_TEXT_MIME, &big)]).unwrap();
+        let payload = ClipboardItem::new(device, Version::new(1, device), vec![item]).unwrap();
+        let encoded = Message::Clipboard(Box::new(payload)).encode().unwrap();
+        let expected = big.len();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let allowed = initiator_public;
+
+        let responder = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut peer = Peer::accept(stream, &responder_id, |key| key == allowed.as_slice())
+                .expect("peer allowed");
+            let (out_tx, out_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+            let (result_tx, result_rx) = std::sync::mpsc::channel::<usize>();
+            let reader = std::thread::spawn(move || {
+                peer.run(out_rx, |message| {
+                    if let Message::Clipboard(item) = message {
+                        if let Some(text) = item.plain_text() {
+                            let _ = result_tx.send(text.len());
+                        }
+                    }
+                })
+                .unwrap();
+            });
+            let received = result_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("large payload arrived");
+            drop(out_tx);
+            reader.join().unwrap();
+            received
+        });
+
+        let mut peer = Peer::connect(address, &initiator_id, &responder_public).unwrap();
+        let (out_tx, out_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let sender = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            out_tx.send(encoded).unwrap();
+        });
+        peer.run(out_rx, |_| {}).unwrap();
+        sender.join().unwrap();
+
+        assert_eq!(responder.join().unwrap(), expected);
     }
 }

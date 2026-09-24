@@ -13,6 +13,8 @@ use crate::config::Config;
 static CONNECTION_SEQ: AtomicU64 = AtomicU64::new(0);
 const RECONNECT_MIN: Duration = Duration::from_millis(500);
 const RECONNECT_MAX: Duration = Duration::from_secs(3);
+// Keep below the transport frame limit so an oversized payload is skipped, not fatal.
+const MAX_PAYLOAD: usize = 60 * 1024 * 1024;
 
 pub(crate) enum NetEvent {
     Clipboard(ClipboardItem),
@@ -52,6 +54,13 @@ pub(crate) fn broadcast(registry: &Registry, item: &ClipboardItem) {
         tracing::warn!("failed to encode clipboard message");
         return;
     };
+    if bytes.len() > MAX_PAYLOAD {
+        tracing::warn!(
+            bytes = bytes.len(),
+            "clipboard payload too large to send; skipping"
+        );
+        return;
+    }
     let peers = registry.lock().expect("registry mutex");
     for slot in peers.values() {
         let _ = slot.sender.send(bytes.clone());
@@ -62,6 +71,13 @@ pub(crate) fn send_to(registry: &Registry, device: DeviceId, item: &ClipboardIte
     let Ok(bytes) = Message::Clipboard(Box::new(item.clone())).encode() else {
         return;
     };
+    if bytes.len() > MAX_PAYLOAD {
+        tracing::warn!(
+            bytes = bytes.len(),
+            "clipboard payload too large to send; skipping"
+        );
+        return;
+    }
     if let Some(slot) = registry.lock().expect("registry mutex").get(&device) {
         let _ = slot.sender.send(bytes);
     }

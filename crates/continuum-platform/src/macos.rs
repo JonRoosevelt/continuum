@@ -190,4 +190,33 @@ mod tests {
             pasteboard.setString_forType(&restored, text_type);
         }
     }
+
+    #[test]
+    #[allow(unsafe_code)]
+    fn roundtrips_multiple_items() {
+        let pasteboard = NSPasteboard::generalPasteboard();
+        // SAFETY: framework-provided constant; read-only.
+        let text_type = unsafe { NSPasteboardTypeString };
+        let original = pasteboard
+            .stringForType(text_type)
+            .map(|value| value.to_string());
+
+        let first = ClipItem::new(vec![Representation::text(PLAIN_TEXT_MIME, "first")]).unwrap();
+        let second = ClipItem::new(vec![Representation::text(PLAIN_TEXT_MIME, "second")]).unwrap();
+        let mut clipboard = MacClipboard::new();
+        clipboard.write(&[first, second]).unwrap();
+
+        let read = read_pasteboard(&pasteboard)
+            .unwrap()
+            .expect("pasteboard changed after write");
+        assert_eq!(read.len(), 2);
+        assert_eq!(read[0].plain_text(), Some("first"));
+        assert_eq!(read[1].plain_text(), Some("second"));
+
+        pasteboard.clearContents();
+        if let Some(text) = original {
+            let restored = NSString::from_str(&text);
+            pasteboard.setString_forType(&restored, text_type);
+        }
+    }
 }

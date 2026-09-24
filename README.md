@@ -89,8 +89,9 @@ device pins the other's public key into its config and connects on next start.
 - Clipboard content is never written to disk (no history in v1).
 
 Known gaps: the identity key is stored as a `0600` file, not yet in the OS
-keychain / libsecret; large payloads fall back to inline transfer (X11 INCR is
-not implemented).
+keychain / libsecret. On Wayland, payloads above 48 KiB are written via `wl-copy`
+(wl-clipboard-rs truncates large clipboard writes); X11 large payload / INCR is
+not implemented. `continuum put` copies stdin to the clipboard (and holds it).
 
 ## Platform notes
 

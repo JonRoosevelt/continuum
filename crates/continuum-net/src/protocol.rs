@@ -42,4 +42,23 @@ mod tests {
             _ => panic!("expected a clipboard message"),
         }
     }
+
+    #[test]
+    fn multiple_items_roundtrip() {
+        let device = DeviceId::from_bytes([4; 32]);
+        let items = vec![
+            ClipItem::new(vec![Representation::text(PLAIN_TEXT_MIME, "one")]).unwrap(),
+            ClipItem::new(vec![Representation::text(PLAIN_TEXT_MIME, "two")]).unwrap(),
+        ];
+        let payload = ClipboardItem::new(device, Version::new(2, device), items).unwrap();
+
+        let encoded = Message::Clipboard(Box::new(payload)).encode().unwrap();
+        match Message::decode(&encoded).unwrap() {
+            Message::Clipboard(decoded) => {
+                assert_eq!(decoded.items.len(), 2);
+                assert_eq!(decoded.plain_text(), Some("one"));
+            }
+            _ => panic!("expected a clipboard message"),
+        }
+    }
 }

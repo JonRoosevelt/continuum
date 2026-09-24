@@ -5,7 +5,7 @@ use snow::{HandshakeState, TransportState};
 use crate::error::NetError;
 use crate::identity::{Identity, NOISE_PARAMS};
 
-const MAX_FRAME: u32 = 16 * 1024 * 1024;
+const MAX_FRAME: u32 = 64 * 1024 * 1024;
 const HANDSHAKE_BUF: usize = 2048;
 const TAG_LEN: usize = 16;
 const XX_PARAMS: &str = "Noise_XX_25519_ChaChaPoly_BLAKE2s";

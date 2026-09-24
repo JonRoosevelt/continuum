@@ -121,38 +121,89 @@ impl ClipboardBackend for WaylandClipboard {
             ));
         }
 
-        let mut sources = Vec::new();
-        for item in items {
-            for representation in &item.representations {
-                let mime_type = match representation.mime.as_str() {
-                    PLAIN_TEXT_MIME => copy::MimeType::Text,
-                    HTML_MIME | RTF_MIME | PNG_MIME => {
-                        copy::MimeType::Specific(representation.mime.clone())
-                    }
-                    _ => continue,
-                };
-                sources.push(MimeSource {
-                    source: Source::Bytes(representation.bytes.clone().into_boxed_slice()),
-                    mime_type,
-                });
-            }
-        }
+        let total: usize = items
+            .iter()
+            .flat_map(|item| &item.representations)
+            .filter(|rep| is_supported(&rep.mime))
+            .map(|rep| rep.bytes.len())
+            .sum();
 
-        if sources.is_empty() {
-            return Err(ClipboardError::Write(
-                "clipboard payload has no supported representations".into(),
-            ));
+        if total > INLINE_MAX {
+            write_via_wl_copy(items)?;
+        } else {
+            write_inline(items)?;
         }
-
-        let mut options = Options::new();
-        // foreground(false) spawns the serving thread and returns immediately.
-        options
-            .clipboard(CopyClipboardType::Regular)
-            .seat(CopySeat::All)
-            .foreground(false);
-        copy::copy_multi(options, sources).map_err(|err| ClipboardError::Write(err.to_string()))?;
 
         self.last_hash = Some(content_hash(items));
         Ok(())
     }
+}
+
+// wl-clipboard-rs truncates payloads above one pipe buffer (~64 KiB); above this size we
+// hand the data to `wl-copy`, which streams it reliably.
+const INLINE_MAX: usize = 48 * 1024;
+
+fn is_supported(mime: &str) -> bool {
+    matches!(mime, PLAIN_TEXT_MIME | HTML_MIME | RTF_MIME | PNG_MIME)
+}
+
+fn write_inline(items: &[ClipItem]) -> Result<(), ClipboardError> {
+    let mut sources = Vec::new();
+    for item in items {
+        for representation in &item.representations {
+            let mime_type = match representation.mime.as_str() {
+                PLAIN_TEXT_MIME => copy::MimeType::Text,
+                HTML_MIME | RTF_MIME | PNG_MIME => {
+                    copy::MimeType::Specific(representation.mime.clone())
+                }
+                _ => continue,
+            };
+            sources.push(MimeSource {
+                source: Source::Bytes(representation.bytes.clone().into_boxed_slice()),
+                mime_type,
+            });
+        }
+    }
+    if sources.is_empty() {
+        return Err(ClipboardError::Write(
+            "clipboard payload has no supported representations".into(),
+        ));
+    }
+
+    let mut options = Options::new();
+    options
+        .clipboard(CopyClipboardType::Regular)
+        .seat(CopySeat::All)
+        .foreground(false);
+    copy::copy_multi(options, sources).map_err(|err| ClipboardError::Write(err.to_string()))
+}
+
+/// Large payloads: offer the single best representation through `wl-copy`.
+fn write_via_wl_copy(items: &[ClipItem]) -> Result<(), ClipboardError> {
+    let preference = [PNG_MIME, HTML_MIME, RTF_MIME, PLAIN_TEXT_MIME];
+    let representation = preference
+        .iter()
+        .find_map(|mime| items.iter().find_map(|item| item.representation(mime)))
+        .ok_or_else(|| ClipboardError::Write("no supported representation".into()))?;
+
+    let mut child = std::process::Command::new("wl-copy")
+        .args(["--type", &representation.mime, "--foreground"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|err| ClipboardError::Write(format!("wl-copy unavailable: {err}")))?;
+
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| ClipboardError::Write("wl-copy stdin unavailable".into()))?;
+    let bytes = representation.bytes.clone();
+    std::thread::spawn(move || {
+        use std::io::Write as _;
+        let _ = stdin.write_all(&bytes);
+        drop(stdin);
+        let _ = child.wait();
+    });
+    Ok(())
 }

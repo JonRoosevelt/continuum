@@ -203,6 +203,7 @@ fn main() {
         Some("status") => exit_on_error(show_status()),
         Some("peer") => exit_on_error(peer_command(&args[1..])),
         Some("dump") => exit_on_error(dump()),
+        Some("put") => exit_on_error(put()),
         Some("pair") => exit_on_error(pair_command(&args[1..])),
         Some("pair-listen") => exit_on_error(pairing::pair_listen()),
         Some("install-service") => exit_on_error(service::install()),
@@ -302,6 +303,25 @@ fn dump() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn put() -> anyhow::Result<()> {
+    use std::io::Read as _;
+    let mut input = Vec::new();
+    std::io::stdin().read_to_end(&mut input)?;
+    let text = String::from_utf8_lossy(&input).into_owned();
+    let item = continuum_core::ClipItem::new(vec![continuum_core::Representation::text(
+        continuum_core::PLAIN_TEXT_MIME,
+        &text,
+    )])?;
+    let mut backend = continuum_platform::open()
+        .map_err(|err| anyhow::anyhow!("clipboard unavailable: {err}"))?;
+    backend.write(&[item])?;
+    println!("copied {} bytes; holding the selection", input.len());
+    // On Wayland the process must outlive the copy to keep serving the selection.
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(3600));
+    }
+}
+
 fn pair_command(args: &[String]) -> anyhow::Result<()> {
     let Some(host) = args.first() else {
         anyhow::bail!(
@@ -326,6 +346,7 @@ fn print_help() {
          continuum show-id         print this device's id and public key\n  \
          continuum status          show config, listen address and peers\n  \
          continuum dump            print the current clipboard representations\n  \
+         continuum put             copy stdin to the clipboard and hold it\n  \
          continuum peer add <name> <host:port> <public_key_hex>\n  \
          continuum peer list\n  \
          continuum pair <host>      pair with a device running `pair-listen`\n  \
