@@ -1,40 +1,70 @@
 use std::collections::HashMap;
 use std::net::TcpListener;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use continuum_core::{ClipboardItem, DeviceId};
-use continuum_net::{device_id_from_public, Identity, Message, Peer};
+use continuum_net::{Identity, Message, Peer};
 
 use crate::config::Config;
 
-pub type Registry = Arc<Mutex<HashMap<DeviceId, mpsc::Sender<Vec<u8>>>>>;
+static CONNECTION_SEQ: AtomicU64 = AtomicU64::new(0);
+const RECONNECT_MIN: Duration = Duration::from_millis(500);
+const RECONNECT_MAX: Duration = Duration::from_secs(3);
 
-#[must_use]
+pub(crate) enum NetEvent {
+    Clipboard(ClipboardItem),
+    PeerUp(DeviceId),
+    PeerDown(DeviceId),
+}
+
+pub(crate) struct Slot {
+    sender: mpsc::Sender<Vec<u8>>,
+    conn_id: u64,
+    dialer: DeviceId,
+}
+
+pub(crate) type Registry = Arc<Mutex<HashMap<DeviceId, Slot>>>;
+
 #[allow(dead_code)]
-pub fn peer_count(registry: &Registry) -> usize {
+#[must_use]
+pub(crate) fn peer_count(registry: &Registry) -> usize {
     registry.lock().expect("registry mutex").len()
 }
 
-pub fn broadcast(registry: &Registry, item: &ClipboardItem) {
+pub(crate) fn broadcast(registry: &Registry, item: &ClipboardItem) {
     let Ok(bytes) = Message::Clipboard(Box::new(item.clone())).encode() else {
         tracing::warn!("failed to encode clipboard message");
         return;
     };
     let peers = registry.lock().expect("registry mutex");
-    tracing::debug!(peers = peers.len(), "broadcasting clipboard");
-    for sender in peers.values() {
-        let _ = sender.send(bytes.clone());
+    for slot in peers.values() {
+        let _ = slot.sender.send(bytes.clone());
     }
 }
 
-pub fn start<F>(identity: Arc<Identity>, config: &Config, on_remote: F) -> anyhow::Result<Registry>
+pub(crate) fn send_to(registry: &Registry, device: DeviceId, item: &ClipboardItem) {
+    let Ok(bytes) = Message::Clipboard(Box::new(item.clone())).encode() else {
+        return;
+    };
+    if let Some(slot) = registry.lock().expect("registry mutex").get(&device) {
+        let _ = slot.sender.send(bytes);
+    }
+}
+
+pub(crate) fn start<E>(
+    identity: Arc<Identity>,
+    config: &Config,
+    on_event: E,
+) -> anyhow::Result<Registry>
 where
-    F: Fn(ClipboardItem) + Send + Sync + 'static,
+    E: Fn(NetEvent) + Send + Sync + 'static,
 {
     let registry: Registry = Arc::new(Mutex::new(HashMap::new()));
-    let on_remote: Arc<dyn Fn(ClipboardItem) + Send + Sync> = Arc::new(on_remote);
+    let on_event: Arc<dyn Fn(NetEvent) + Send + Sync> = Arc::new(on_event);
+    let local_id = identity.device_id();
     let allowed: Arc<Vec<Vec<u8>>> = Arc::new(
         config
             .peers
@@ -48,17 +78,17 @@ where
         let registry = Arc::clone(&registry);
         let identity = Arc::clone(&identity);
         let allowed = Arc::clone(&allowed);
-        let on_remote = Arc::clone(&on_remote);
+        let on_event = Arc::clone(&on_event);
         thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let registry = Arc::clone(&registry);
                 let identity = Arc::clone(&identity);
                 let allowed = Arc::clone(&allowed);
-                let on_remote = Arc::clone(&on_remote);
+                let on_event = Arc::clone(&on_event);
                 thread::spawn(move || {
                     let allow = |key: &[u8]| allowed.iter().any(|known| known.as_slice() == key);
                     match Peer::accept(stream, &identity, allow) {
-                        Ok(peer) => run_peer(peer, registry, on_remote),
+                        Ok(peer) => register(peer, false, local_id, registry, on_event),
                         Err(err) => tracing::warn!(%err, "rejected inbound peer"),
                     }
                 });
@@ -71,30 +101,29 @@ where
             tracing::warn!(name = %peer.name, "invalid public key in config; skipping peer");
             continue;
         };
-        // Deterministic dial tie-break: only the larger DeviceId dials, so two configured
-        // peers form a single connection instead of two overlapping ones.
-        if identity.device_id() <= device_id_from_public(&key) {
-            continue;
-        }
         let address = peer.address.clone();
         let name = peer.name.clone();
         let registry = Arc::clone(&registry);
         let identity = Arc::clone(&identity);
-        let on_remote = Arc::clone(&on_remote);
+        let on_event = Arc::clone(&on_event);
         thread::spawn(move || {
-            let mut backoff = Duration::from_millis(500);
+            let mut backoff = RECONNECT_MIN;
             loop {
                 match Peer::connect(&address, &identity, &key) {
                     Ok(peer) => {
-                        tracing::info!(%name, "connected to peer");
-                        backoff = Duration::from_millis(500);
-                        run_peer(peer, Arc::clone(&registry), Arc::clone(&on_remote));
-                        tracing::info!(%name, "peer disconnected");
+                        backoff = RECONNECT_MIN;
+                        register(
+                            peer,
+                            true,
+                            local_id,
+                            Arc::clone(&registry),
+                            Arc::clone(&on_event),
+                        );
                     }
                     Err(err) => tracing::debug!(%name, %err, "connect failed"),
                 }
                 thread::sleep(backoff);
-                backoff = (backoff * 2).min(Duration::from_secs(30));
+                backoff = (backoff * 2).min(RECONNECT_MAX);
             }
         });
     }
@@ -102,29 +131,67 @@ where
     Ok(registry)
 }
 
-fn run_peer(
+/// Registers a connection, resolving duplicates so both peers converge on the same one.
+///
+/// Both sides dial, so a pair can briefly have two connections. The winner is the one dialed
+/// by the peer with the smaller `DeviceId`; if that connection is absent, the other is used so
+/// a single available link is never discarded.
+fn register(
     mut peer: Peer,
+    outbound: bool,
+    local_id: DeviceId,
     registry: Registry,
-    on_remote: Arc<dyn Fn(ClipboardItem) + Send + Sync>,
+    on_event: Arc<dyn Fn(NetEvent) + Send + Sync>,
 ) {
-    let device_id = peer.device_id();
+    let remote = peer.device_id();
+    let dialer = if outbound { local_id } else { remote };
+    let preferred = dialer == local_id.min(remote);
+    let conn_id = CONNECTION_SEQ.fetch_add(1, Ordering::Relaxed);
     let (sender, receiver) = mpsc::channel::<Vec<u8>>();
-    registry
-        .lock()
-        .expect("registry mutex")
-        .insert(device_id, sender);
-    tracing::info!(device = %device_id.short(), "peer registered");
+
+    {
+        let mut peers = registry.lock().expect("registry mutex");
+        if let Some(existing) = peers.get(&remote) {
+            let existing_preferred = existing.dialer == local_id.min(remote);
+            if !(preferred && !existing_preferred) {
+                tracing::debug!(device = %remote.short(), "dropping duplicate connection");
+                return;
+            }
+        }
+        peers.insert(
+            remote,
+            Slot {
+                sender,
+                conn_id,
+                dialer,
+            },
+        );
+    }
+
+    tracing::info!(device = %remote.short(), outbound, "peer registered");
+    on_event(NetEvent::PeerUp(remote));
 
     let result = peer.run(receiver, |message| {
         if let Message::Clipboard(item) = message {
-            tracing::debug!(from = %item.origin.short(), "received clipboard message");
-            on_remote(*item);
+            on_event(NetEvent::Clipboard(*item));
         }
     });
 
-    registry.lock().expect("registry mutex").remove(&device_id);
+    let removed = {
+        let mut peers = registry.lock().expect("registry mutex");
+        if peers.get(&remote).map(|slot| slot.conn_id) == Some(conn_id) {
+            peers.remove(&remote);
+            true
+        } else {
+            false
+        }
+    };
+
     match &result {
-        Ok(()) => tracing::info!(device = %device_id.short(), "peer loop ended"),
-        Err(err) => tracing::info!(device = %device_id.short(), %err, "peer loop ended with error"),
+        Ok(()) => tracing::info!(device = %remote.short(), "peer disconnected"),
+        Err(err) => tracing::info!(device = %remote.short(), %err, "peer disconnected"),
+    }
+    if removed {
+        on_event(NetEvent::PeerDown(remote));
     }
 }

@@ -5,7 +5,7 @@ use continuum_core::{ClipItem, ClipboardItem, Clock, DeviceId, Version};
 use continuum_platform::backend::{ClipboardBackend, ClipboardError};
 
 const ACTIVE_INTERVAL: Duration = Duration::from_millis(100);
-const IDLE_INTERVAL: Duration = Duration::from_millis(1000);
+const IDLE_INTERVAL: Duration = Duration::from_millis(200);
 const ACTIVE_WINDOW: Duration = Duration::from_secs(2);
 
 pub struct Monitor {

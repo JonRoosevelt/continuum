@@ -32,8 +32,9 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 
 - [x] Identity: X25519 static keypair, `DeviceId` = BLAKE3(pubkey), persisted 0600 at the config dir
 - [x] Noise IK session over length-prefixed TCP frames (`snow`), with pinned-key peer verification
-- [ ] Peer connection manager: one persistent connection per peer, keepalive, exponential backoff with jitter (wired in Phase 3)
+- [x] Peer connection manager: both sides dial, duplicate connections resolved by device id, keepalive (ping + idle timeout), reconnect backoff
 - [ ] mDNS discovery (`mdns-sd`, in-process — no Avahi dep) advertising a rotating ephemeral id; manual IP:port fallback (manual works today)
+- [ ] Reconnect backoff jitter
 - [ ] OS keychain / libsecret for the identity key (currently 0600 file); periodic rekey
 
 ## Phase 3 — Sync engine
@@ -43,7 +44,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 - [x] Conflict resolution: LWW by `Version` (Lamport counter, device-id tie-break), stale remotes dropped
 - [x] Multi-device fan-out: broadcast on local change to every connected peer; per-peer send queue
 - [ ] Blob streaming/chunking with per-chunk + whole-payload hash verification; inline small text (<64 KiB)
-- [ ] Reconnect catch-up: current clipboard pulled on (re)connect
+- [x] Reconnect + announce: on peer up, the current clipboard is pushed; offline→online re-pairs and syncs (verified mac↔omarchy)
 - [x] Peer connection manager: persistent per-peer connection with exponential backoff (keepalive/jitter pending)
 - [x] Headless mode (`--headless`) for servers and testing without a GUI
 

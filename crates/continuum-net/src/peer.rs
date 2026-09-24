@@ -1,7 +1,7 @@
 use std::io::{ErrorKind, Read as _};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::mpsc::{Receiver, TryRecvError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use continuum_core::DeviceId;
 
@@ -13,6 +13,8 @@ use crate::protocol::Message;
 const READ_TIMEOUT: Duration = Duration::from_millis(50);
 const READ_CHUNK: usize = 64 * 1024;
 const MAX_FRAME: u32 = 16 * 1024 * 1024;
+const PING_INTERVAL: Duration = Duration::from_secs(10);
+const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct Peer {
     stream: TcpStream,
@@ -81,9 +83,9 @@ impl Peer {
         device_id_from_public(&self.public_key)
     }
 
-    /// Serves a peer connection until it disconnects: flushes queued outbound frames and
-    /// dispatches decoded inbound messages. Uses a short read timeout so a single thread can
-    /// both send and receive without holding up pushes.
+    /// Serves a peer connection until it disconnects: flushes queued outbound frames,
+    /// answers pings, and dispatches decoded inbound messages. A short read timeout lets a
+    /// single thread both send and receive; a keepalive detects dead peers.
     pub fn run(
         &mut self,
         outbound: Receiver<Vec<u8>>,
@@ -92,30 +94,51 @@ impl Peer {
         self.stream.set_read_timeout(Some(READ_TIMEOUT))?;
         let mut buffer: Vec<u8> = Vec::new();
         let mut chunk = vec![0u8; READ_CHUNK];
+        let mut last_ping = Instant::now();
+        let mut last_seen = Instant::now();
+
         loop {
             loop {
                 match outbound.try_recv() {
-                    Ok(payload) => {
-                        let sealed = self.session.seal(&payload)?;
-                        write_frame(&mut self.stream, &sealed)?;
-                    }
+                    Ok(payload) => self.write_message(&payload)?,
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => return Ok(()),
                 }
             }
 
+            if last_ping.elapsed() >= PING_INTERVAL {
+                self.write_message(&Message::Ping.encode()?)?;
+                last_ping = Instant::now();
+            }
+
             match self.stream.read(&mut chunk) {
                 Ok(0) => return Ok(()),
-                Ok(n) => buffer.extend_from_slice(&chunk[..n]),
+                Ok(n) => {
+                    buffer.extend_from_slice(&chunk[..n]);
+                    last_seen = Instant::now();
+                }
                 Err(err) if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
                 Err(err) => return Err(NetError::Io(err)),
             }
 
             while let Some(frame) = take_frame(&mut buffer)? {
                 let plain = self.session.open(&frame)?;
-                on_message(Message::decode(&plain)?);
+                match Message::decode(&plain)? {
+                    Message::Ping => self.write_message(&Message::Pong.encode()?)?,
+                    Message::Pong => {}
+                    other => on_message(other),
+                }
+            }
+
+            if last_seen.elapsed() >= IDLE_TIMEOUT {
+                return Err(NetError::TimedOut);
             }
         }
+    }
+
+    fn write_message(&mut self, payload: &[u8]) -> Result<(), NetError> {
+        let sealed = self.session.seal(payload)?;
+        write_frame(&mut self.stream, &sealed)
     }
 }
 

@@ -1,19 +1,19 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use continuum_core::ClipboardItem;
 use tao::event::{Event, StartCause};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tray_icon::menu::MenuEvent;
 use tray_icon::TrayIconEvent;
 
+use crate::net::NetEvent;
 use crate::tray::{TrayAction, TrayApp};
 use crate::Core;
 
 enum UserEvent {
     Menu(MenuEvent),
     Tray(TrayIconEvent),
-    Remote(ClipboardItem),
+    Net(NetEvent),
 }
 
 struct App {
@@ -70,9 +70,9 @@ pub fn run() {
                     update_status(app);
                 }
             }
-            Event::UserEvent(UserEvent::Remote(item)) => {
+            Event::UserEvent(UserEvent::Net(event)) => {
                 if let Some(app) = app.as_mut() {
-                    app.core.apply_remote(item);
+                    app.core.handle_event(event);
                 }
             }
             Event::UserEvent(UserEvent::Menu(event)) => {
@@ -119,8 +119,8 @@ fn update_status(app: &App) {
 fn build_app(proxy: &EventLoopProxy<UserEvent>) -> anyhow::Result<App> {
     let loaded = crate::load()?;
     let proxy = proxy.clone();
-    let core = Core::new(Arc::clone(&loaded.identity), &loaded.config, move |item| {
-        let _ = proxy.send_event(UserEvent::Remote(item));
+    let core = Core::new(Arc::clone(&loaded.identity), &loaded.config, move |event| {
+        let _ = proxy.send_event(UserEvent::Net(event));
     })?;
     Ok(App {
         core,

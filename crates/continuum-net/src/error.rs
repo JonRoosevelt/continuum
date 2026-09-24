@@ -12,4 +12,6 @@ pub enum NetError {
     Codec(String),
     #[error("peer presented an unexpected static key")]
     UnknownPeer,
+    #[error("peer connection timed out")]
+    TimedOut,
 }

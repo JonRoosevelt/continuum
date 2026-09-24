@@ -11,7 +11,7 @@ mod tray;
 use std::collections::{HashSet, VecDeque};
 use std::sync::{mpsc, Arc};
 
-use continuum_core::{ClipboardItem, ContentHash, Version};
+use continuum_core::{ClipboardItem, ContentHash, DeviceId, Version};
 use continuum_net::Identity;
 use monitor::Monitor;
 
@@ -58,12 +58,12 @@ impl Core {
     pub(crate) fn new(
         identity: Arc<Identity>,
         config: &config::Config,
-        on_remote: impl Fn(ClipboardItem) + Send + Sync + 'static,
+        on_event: impl Fn(net::NetEvent) + Send + Sync + 'static,
     ) -> anyhow::Result<Self> {
         let device_id = identity.device_id();
         Ok(Self {
             monitor: Monitor::open(device_id)?,
-            registry: net::start(Arc::clone(&identity), config, on_remote)?,
+            registry: net::start(Arc::clone(&identity), config, on_event)?,
             recent: Recent::new(),
             last_version: None,
             last_item: None,
@@ -113,6 +113,26 @@ impl Core {
                 );
             }
             Err(err) => tracing::warn!(%err, "failed to write remote clipboard"),
+        }
+    }
+
+    pub(crate) fn handle_event(&mut self, event: net::NetEvent) {
+        match event {
+            net::NetEvent::Clipboard(item) => self.apply_remote(item),
+            net::NetEvent::PeerUp(device) => self.announce_to(device),
+            net::NetEvent::PeerDown(device) => {
+                tracing::info!(device = %device.short(), "peer offline");
+            }
+        }
+    }
+
+    fn announce_to(&self, device: DeviceId) {
+        match &self.last_item {
+            Some(item) => {
+                tracing::info!(device = %device.short(), "announcing current clipboard");
+                net::send_to(&self.registry, device, item);
+            }
+            None => tracing::debug!(device = %device.short(), "no clipboard to announce"),
         }
     }
 
@@ -299,18 +319,25 @@ fn run_headless_exit() {
 
 fn run_headless() -> anyhow::Result<()> {
     let loaded = load()?;
-    let (sender, receiver) = mpsc::channel::<ClipboardItem>();
-    let mut core = Core::new(Arc::clone(&loaded.identity), &loaded.config, move |item| {
-        let _ = sender.send(item);
+    let (sender, receiver) = mpsc::channel::<net::NetEvent>();
+    let mut core = Core::new(Arc::clone(&loaded.identity), &loaded.config, move |event| {
+        let _ = sender.send(event);
     })?;
 
     loop {
-        while let Ok(item) = receiver.try_recv() {
-            core.apply_remote(item);
+        // Block until an event arrives or the poll deadline elapses, so remote peer and
+        // clipboard activity is handled immediately instead of waiting for the next poll.
+        match receiver.recv_timeout(core.monitor.next_delay()) {
+            Ok(event) => core.handle_event(event),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+        while let Ok(event) = receiver.try_recv() {
+            core.handle_event(event);
         }
         core.poll()?;
-        std::thread::sleep(core.monitor.next_delay());
     }
+    Ok(())
 }
 
 pub(crate) fn report_access_behavior() {
@@ -344,4 +371,37 @@ fn init_tracing() {
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
         .init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hash(seed: usize) -> ContentHash {
+        let mut bytes = [0u8; 32];
+        bytes[..8].copy_from_slice(&(seed as u64).to_le_bytes());
+        ContentHash::from_bytes(bytes)
+    }
+
+    #[test]
+    fn recent_deduplicates() {
+        let mut recent = Recent::new();
+        assert!(recent.insert(hash(1)));
+        assert!(!recent.insert(hash(1)));
+        assert!(recent.insert(hash(2)));
+    }
+
+    #[test]
+    fn recent_evicts_oldest() {
+        let mut recent = Recent::new();
+        for seed in 0..RECENT_CAPACITY {
+            assert!(recent.insert(hash(seed)));
+        }
+        assert_eq!(recent.set.len(), RECENT_CAPACITY);
+
+        assert!(recent.insert(hash(RECENT_CAPACITY)));
+        assert!(!recent.insert(hash(RECENT_CAPACITY)));
+        assert!(recent.insert(hash(0)));
+        assert_eq!(recent.set.len(), RECENT_CAPACITY);
+    }
 }
