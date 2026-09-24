@@ -89,7 +89,7 @@ fn macos_plist(exe: &str) -> String {
          \x20 <key>Label</key><string>dev.continuum.agent</string>\n\
          \x20 <key>ProgramArguments</key><array><string>{exe}</string></array>\n\
          \x20 <key>RunAtLoad</key><true/>\n\
-         <key>KeepAlive</key><true/>\n\
+         <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n\
          </dict>\n\
          </plist>\n"
     )
