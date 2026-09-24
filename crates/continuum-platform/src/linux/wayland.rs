@@ -2,6 +2,7 @@ use std::io::Read as _;
 
 use continuum_core::{
     content_hash, ClipItem, ContentHash, Representation, HTML_MIME, PLAIN_TEXT_MIME, PNG_MIME,
+    RTF_MIME,
 };
 use wl_clipboard_rs::copy::{
     self, ClipboardType as CopyClipboardType, MimeSource, Options, Seat as CopySeat, Source,
@@ -70,6 +71,20 @@ impl WaylandClipboard {
 
 impl ClipboardBackend for WaylandClipboard {
     fn read(&mut self) -> Result<Option<Vec<ClipItem>>, ClipboardError> {
+        let Some(items) = self.read_current()? else {
+            return Ok(None);
+        };
+        // Wayland data-control exposes no change counter; content hashing is the shared
+        // change-detection mechanism, and write() seeds the same hash to suppress echoes.
+        let hash = content_hash(&items);
+        if self.last_hash == Some(hash) {
+            return Ok(None);
+        }
+        self.last_hash = Some(hash);
+        Ok(Some(items))
+    }
+
+    fn read_current(&mut self) -> Result<Option<Vec<ClipItem>>, ClipboardError> {
         let Some(offered) = self.offered_mime_types()? else {
             return Ok(None);
         };
@@ -86,6 +101,9 @@ impl ClipboardBackend for WaylandClipboard {
         if let Some(bytes) = self.fetch(PasteMimeType::Specific(HTML_MIME))? {
             representations.push(Representation::new(HTML_MIME, bytes));
         }
+        if let Some(bytes) = self.fetch(PasteMimeType::Specific(RTF_MIME))? {
+            representations.push(Representation::new(RTF_MIME, bytes));
+        }
         if let Some(bytes) = self.fetch(PasteMimeType::Specific(PNG_MIME))? {
             representations.push(Representation::new(PNG_MIME, bytes));
         }
@@ -93,16 +111,7 @@ impl ClipboardBackend for WaylandClipboard {
         if representations.is_empty() {
             return Ok(None);
         }
-
-        // Wayland data-control exposes no change counter; content hashing is the shared
-        // change-detection mechanism, and write() seeds the same hash to suppress echoes.
-        let items = vec![ClipItem::new(representations)?];
-        let hash = content_hash(&items);
-        if self.last_hash == Some(hash) {
-            return Ok(None);
-        }
-        self.last_hash = Some(hash);
-        Ok(Some(items))
+        Ok(Some(vec![ClipItem::new(representations)?]))
     }
 
     fn write(&mut self, items: &[ClipItem]) -> Result<(), ClipboardError> {
@@ -117,7 +126,9 @@ impl ClipboardBackend for WaylandClipboard {
             for representation in &item.representations {
                 let mime_type = match representation.mime.as_str() {
                     PLAIN_TEXT_MIME => copy::MimeType::Text,
-                    HTML_MIME | PNG_MIME => copy::MimeType::Specific(representation.mime.clone()),
+                    HTML_MIME | RTF_MIME | PNG_MIME => {
+                        copy::MimeType::Specific(representation.mime.clone())
+                    }
                     _ => continue,
                 };
                 sources.push(MimeSource {

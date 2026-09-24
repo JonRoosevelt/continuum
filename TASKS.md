@@ -68,7 +68,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 ## Phase 6 — Validation
 
 - [x] End-to-end macOS ⇄ Linux (omarchy / Hyprland over Tailscale): plain text verified both directions
-- [ ] Remaining E2E formats: rich text, image, multi-item, large payload
+- [x] E2E formats: HTML and PNG images both directions (byte-identical hashes), incl. macOS TIFF->PNG conversion crossing to Linux
+- [ ] Remaining E2E formats: multi-item selection, large payload/X11 INCR
 - [ ] Latency benchmark harness (detect → write) and idle CPU/memory profiling
 - [ ] Two-device conflict + echo-loop regression tests
 - [ ] Runtime-verify the Linux X11 backend (only Wayland exercised so far)

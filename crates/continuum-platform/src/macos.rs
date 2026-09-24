@@ -5,7 +5,7 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSArray, NSData, NSString};
 
-use continuum_core::{ClipItem, Representation};
+use continuum_core::{ClipItem, Representation, PNG_MIME, TIFF_MIME};
 
 use crate::backend::{AccessBehavior, ClipboardBackend, ClipboardError};
 use crate::mime;
@@ -54,6 +54,10 @@ impl ClipboardBackend for MacClipboard {
         }
         self.last_change_count = count;
         read_pasteboard(&pasteboard)
+    }
+
+    fn read_current(&mut self) -> Result<Option<Vec<ClipItem>>, ClipboardError> {
+        read_pasteboard(&NSPasteboard::generalPasteboard())
     }
 
     fn write(&mut self, items: &[ClipItem]) -> Result<(), ClipboardError> {
@@ -120,11 +124,35 @@ fn read_pasteboard(pasteboard: &NSPasteboard) -> Result<Option<Vec<ClipItem>>, C
             representations.push(Representation::new(target, data.to_vec()));
         }
         if !representations.is_empty() {
+            normalize_images(&mut representations);
             result.push(ClipItem::new(representations)?);
         }
     }
 
     Ok((!result.is_empty()).then_some(result))
+}
+
+/// Prefer PNG for images (interoperable with Linux); convert a lone TIFF to PNG.
+fn normalize_images(representations: &mut Vec<Representation>) {
+    if representations.iter().any(|rep| rep.mime == PNG_MIME) {
+        representations.retain(|rep| rep.mime != TIFF_MIME);
+        return;
+    }
+    if let Some(index) = representations.iter().position(|rep| rep.mime == TIFF_MIME) {
+        if let Some(png) = tiff_to_png(&representations[index].bytes) {
+            representations[index] = Representation::new(PNG_MIME, png);
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn tiff_to_png(tiff: &[u8]) -> Option<Vec<u8>> {
+    let image = image::load_from_memory_with_format(tiff, image::ImageFormat::Tiff).ok()?;
+    let mut png = Vec::new();
+    image
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .ok()?;
+    Some(png)
 }
 
 #[cfg(test)]

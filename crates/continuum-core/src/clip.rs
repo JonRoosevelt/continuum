@@ -7,7 +7,9 @@ use crate::lamport::Version;
 
 pub const PLAIN_TEXT_MIME: &str = "text/plain;charset=utf-8";
 pub const HTML_MIME: &str = "text/html";
+pub const RTF_MIME: &str = "text/rtf";
 pub const PNG_MIME: &str = "image/png";
+pub const TIFF_MIME: &str = "image/tiff";
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Representation {

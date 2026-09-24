@@ -202,6 +202,7 @@ fn main() {
         Some("show-id") => exit_on_error(show_id()),
         Some("status") => exit_on_error(show_status()),
         Some("peer") => exit_on_error(peer_command(&args[1..])),
+        Some("dump") => exit_on_error(dump()),
         Some("pair") => exit_on_error(pair_command(&args[1..])),
         Some("pair-listen") => exit_on_error(pairing::pair_listen()),
         Some("install-service") => exit_on_error(service::install()),
@@ -284,6 +285,23 @@ fn peer_command(args: &[String]) -> anyhow::Result<()> {
     }
 }
 
+fn dump() -> anyhow::Result<()> {
+    let mut backend = continuum_platform::open()
+        .map_err(|err| anyhow::anyhow!("clipboard unavailable: {err}"))?;
+    match backend.read_current()? {
+        Some(items) => {
+            for (index, item) in items.iter().enumerate() {
+                println!("item {index}: hash {}", item.content_hash());
+                for rep in &item.representations {
+                    println!("  {:<28} {} bytes", rep.mime, rep.bytes.len());
+                }
+            }
+        }
+        None => println!("(clipboard empty or holds no supported representations)"),
+    }
+    Ok(())
+}
+
 fn pair_command(args: &[String]) -> anyhow::Result<()> {
     let Some(host) = args.first() else {
         anyhow::bail!(
@@ -307,6 +325,7 @@ fn print_help() {
          continuum --headless      run without a GUI\n  \
          continuum show-id         print this device's id and public key\n  \
          continuum status          show config, listen address and peers\n  \
+         continuum dump            print the current clipboard representations\n  \
          continuum peer add <name> <host:port> <public_key_hex>\n  \
          continuum peer list\n  \
          continuum pair <host>      pair with a device running `pair-listen`\n  \

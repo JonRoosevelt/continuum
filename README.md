@@ -55,6 +55,7 @@ device pins the other's public key into its config and connects on next start.
 | `continuum status` | config path, listen address, paired peers |
 | `continuum peer add <name> <host:port> <public_key_hex>` | manual pairing |
 | `continuum peer list` | list peers |
+| `continuum dump` | print current clipboard representations (debug) |
 | `continuum pair <host>` / `pair-listen` | interactive pairing |
 | `continuum install-service` / `uninstall-service` | login/autostart service |
 
@@ -82,6 +83,7 @@ device pins the other's public key into its config and connects on next start.
   static key is pinned in config (pairing, or `peer add`).
 - Pairing uses a Noise XX handshake plus a 6-digit short authentication string
   that both devices must match, defeating a man-in-the-middle.
+- Images are normalized to PNG (a macOS-only TIFF is converted) so they interoperate with Linux.
 - Sensitive content is skipped by default (`org.nspasteboard` transient/concealed/
   auto-generated, `com.apple.is-remote-clipboard`, `x-kde-passwordManagerHint`).
 - Clipboard content is never written to disk (no history in v1).

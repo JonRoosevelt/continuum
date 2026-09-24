@@ -10,6 +10,7 @@ use x11rb::wrapper::ConnectionExt as _;
 
 use continuum_core::{
     content_hash, ClipItem, ContentHash, Representation, HTML_MIME, PLAIN_TEXT_MIME, PNG_MIME,
+    RTF_MIME,
 };
 
 use crate::backend::{ClipboardBackend, ClipboardError};
@@ -24,6 +25,7 @@ struct Atoms {
     string: Atom,
     plain: Atom,
     html: Atom,
+    rtf: Atom,
     png: Atom,
     incr: Atom,
     timestamp: Atom,
@@ -79,6 +81,7 @@ impl X11Clipboard {
             string: intern(&conn, "STRING", false)?,
             plain: intern(&conn, PLAIN_TEXT_MIME, false)?,
             html: intern(&conn, HTML_MIME, false)?,
+            rtf: intern(&conn, RTF_MIME, false)?,
             png: intern(&conn, PNG_MIME, false)?,
             incr: intern(&conn, "INCR", false)?,
             timestamp: intern(&conn, "TIMESTAMP", false)?,
@@ -133,6 +136,12 @@ impl X11Clipboard {
         }
         if owned
             .iter()
+            .any(|item| item.representation(RTF_MIME).is_some())
+        {
+            targets.push(self.atoms.rtf);
+        }
+        if owned
+            .iter()
             .any(|item| item.representation(PNG_MIME).is_some())
         {
             targets.push(self.atoms.png);
@@ -155,6 +164,9 @@ impl X11Clipboard {
                         }
                     }
                     HTML_MIME if target == self.atoms.html => {
+                        return Some(representation.bytes.clone())
+                    }
+                    RTF_MIME if target == self.atoms.rtf => {
                         return Some(representation.bytes.clone())
                     }
                     PNG_MIME if target == self.atoms.png => {
@@ -313,6 +325,20 @@ impl X11Clipboard {
 
 impl ClipboardBackend for X11Clipboard {
     fn read(&mut self) -> Result<Option<Vec<ClipItem>>, ClipboardError> {
+        let Some(items) = self.read_current()? else {
+            return Ok(None);
+        };
+        // X11 (without XFixes) exposes no change counter; content hashing is the shared
+        // change-detection mechanism, and write() seeds the same hash to suppress echoes.
+        let hash = content_hash(&items);
+        if self.last_hash == Some(hash) {
+            return Ok(None);
+        }
+        self.last_hash = Some(hash);
+        Ok(Some(items))
+    }
+
+    fn read_current(&mut self) -> Result<Option<Vec<ClipItem>>, ClipboardError> {
         while let Some(event) = self.conn.poll_for_event().map_err(conn_err)? {
             self.handle_event(event)?;
         }
@@ -346,6 +372,11 @@ impl ClipboardBackend for X11Clipboard {
                 representations.push(Representation::new(HTML_MIME, bytes));
             }
         }
+        if let Some(bytes) = self.fetch_bytes(self.atoms.clipboard, self.atoms.rtf)? {
+            if !bytes.is_empty() {
+                representations.push(Representation::new(RTF_MIME, bytes));
+            }
+        }
         if let Some(bytes) = self.fetch_bytes(self.atoms.clipboard, self.atoms.png)? {
             if !bytes.is_empty() {
                 representations.push(Representation::new(PNG_MIME, bytes));
@@ -355,16 +386,7 @@ impl ClipboardBackend for X11Clipboard {
         if representations.is_empty() {
             return Ok(None);
         }
-
-        // X11 (without XFixes) exposes no change counter; content hashing is the shared
-        // change-detection mechanism, and write() seeds the same hash to suppress echoes.
-        let items = vec![ClipItem::new(representations)?];
-        let hash = content_hash(&items);
-        if self.last_hash == Some(hash) {
-            return Ok(None);
-        }
-        self.last_hash = Some(hash);
-        Ok(Some(items))
+        Ok(Some(vec![ClipItem::new(representations)?]))
     }
 
     fn write(&mut self, items: &[ClipItem]) -> Result<(), ClipboardError> {

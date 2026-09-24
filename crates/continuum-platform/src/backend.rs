@@ -15,6 +15,8 @@ pub enum ClipboardError {
 pub trait ClipboardBackend: Send {
     /// Returns `Some` only when the clipboard changed since the previous call.
     fn read(&mut self) -> Result<Option<Vec<ClipItem>>, ClipboardError>;
+    /// Reads the current clipboard regardless of change tracking.
+    fn read_current(&mut self) -> Result<Option<Vec<ClipItem>>, ClipboardError>;
     fn write(&mut self, items: &[ClipItem]) -> Result<(), ClipboardError>;
 }
 

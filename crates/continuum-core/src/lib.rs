@@ -6,6 +6,7 @@ pub mod lamport;
 
 pub use clip::{
     content_hash, ClipItem, ClipboardItem, Representation, HTML_MIME, PLAIN_TEXT_MIME, PNG_MIME,
+    RTF_MIME, TIFF_MIME,
 };
 pub use error::CoreError;
 pub use hash::ContentHash;
