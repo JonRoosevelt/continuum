@@ -7,7 +7,11 @@ license.workspace = true
 description = "Discovery, transport and crypto for Continuum peers"
 
 [dependencies]
+blake3 = "1.8.7"
 continuum-core.workspace = true
+dirs = "7.0.0"
+snow = "0.9.6"
+thiserror = "2.0.21"
 
 [lints]
 workspace = true
