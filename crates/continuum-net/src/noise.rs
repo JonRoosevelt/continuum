@@ -8,6 +8,7 @@ use crate::identity::{Identity, NOISE_PARAMS};
 const MAX_FRAME: u32 = 16 * 1024 * 1024;
 const HANDSHAKE_BUF: usize = 2048;
 const TAG_LEN: usize = 16;
+const XX_PARAMS: &str = "Noise_XX_25519_ChaChaPoly_BLAKE2s";
 
 pub struct Session {
     state: TransportState,
@@ -82,6 +83,69 @@ pub fn respond<S: Read + Write>(stream: &mut S, identity: &Identity) -> Result<S
     })
 }
 
+/// XX handshake for pairing: authenticates both static keys without prior knowledge.
+pub fn xx_initiate<S: Read + Write>(
+    stream: &mut S,
+    identity: &Identity,
+) -> Result<Session, NetError> {
+    let params = XX_PARAMS.parse()?;
+    let mut handshake = snow::Builder::new(params)
+        .local_private_key(identity.private_key())
+        .build_initiator()?;
+
+    let mut buffer = vec![0u8; HANDSHAKE_BUF];
+    let written = handshake.write_message(&[], &mut buffer)?;
+    write_frame(stream, &buffer[..written])?;
+
+    let reply = read_frame(stream)?;
+    handshake.read_message(&reply, &mut buffer)?;
+
+    let written = handshake.write_message(&[], &mut buffer)?;
+    write_frame(stream, &buffer[..written])?;
+
+    Ok(Session {
+        state: handshake.into_transport_mode()?,
+    })
+}
+
+pub fn xx_respond<S: Read + Write>(
+    stream: &mut S,
+    identity: &Identity,
+) -> Result<Session, NetError> {
+    let params = XX_PARAMS.parse()?;
+    let mut handshake = snow::Builder::new(params)
+        .local_private_key(identity.private_key())
+        .build_responder()?;
+
+    let mut buffer = vec![0u8; HANDSHAKE_BUF];
+    let request = read_frame(stream)?;
+    handshake.read_message(&request, &mut buffer)?;
+
+    let written = handshake.write_message(&[], &mut buffer)?;
+    write_frame(stream, &buffer[..written])?;
+
+    let finalize = read_frame(stream)?;
+    handshake.read_message(&finalize, &mut buffer)?;
+
+    Ok(Session {
+        state: handshake.into_transport_mode()?,
+    })
+}
+
+/// Six-digit code derived from both static keys; equal on both ends, detects a MITM.
+#[must_use]
+pub fn short_authentication_string(a: &[u8], b: &[u8]) -> String {
+    let (first, second) = if a <= b { (a, b) } else { (b, a) };
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"continuum-pairing-sas");
+    hasher.update(first);
+    hasher.update(second);
+    let digest = hasher.finalize();
+    let bytes = digest.as_bytes();
+    let value = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) % 1_000_000;
+    format!("{value:06}")
+}
+
 fn handshake_state(
     initiator: bool,
     identity: &Identity,
@@ -150,5 +214,37 @@ mod tests {
         assert_eq!(session.recv(&mut stream).unwrap(), b"hello world");
 
         responder.join().unwrap();
+    }
+
+    #[test]
+    fn xx_pairing_agrees_on_authentication_string() {
+        let alice = Identity::generate().unwrap();
+        let bob = Identity::generate().unwrap();
+        let alice_public = alice.public_key().to_vec();
+        let bob_public = bob.public_key().to_vec();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let bob_key = bob_public.clone();
+
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut session = xx_respond(&mut stream, &bob).unwrap();
+            let remote = session.remote_static().unwrap().to_vec();
+            let code = short_authentication_string(&remote, &bob_key);
+            let message = session.recv(&mut stream).unwrap();
+            session.send(&mut stream, &message).unwrap();
+            code
+        });
+
+        let mut stream = TcpStream::connect(address).unwrap();
+        let mut session = xx_initiate(&mut stream, &alice).unwrap();
+        let remote = session.remote_static().unwrap().to_vec();
+        assert_eq!(remote, bob_public);
+        let code = short_authentication_string(&alice_public, &remote);
+        session.send(&mut stream, b"hi").unwrap();
+        assert_eq!(session.recv(&mut stream).unwrap(), b"hi");
+
+        assert_eq!(code, handle.join().unwrap());
     }
 }

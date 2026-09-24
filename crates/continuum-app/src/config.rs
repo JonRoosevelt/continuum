@@ -12,6 +12,8 @@ pub struct PeerConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub name: String,
     pub listen: String,
     #[serde(default)]
     pub peers: Vec<PeerConfig>,
@@ -20,10 +22,17 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            name: default_name(),
             listen: "0.0.0.0:8770".to_string(),
             peers: Vec::new(),
         }
     }
+}
+
+fn default_name() -> String {
+    std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .unwrap_or_default()
 }
 
 impl Config {

@@ -3,6 +3,7 @@ mod config;
 mod gui;
 mod monitor;
 mod net;
+mod pairing;
 #[cfg(feature = "tray")]
 mod tray;
 
@@ -174,6 +175,8 @@ fn main() {
         Some("show-id") => exit_on_error(show_id()),
         Some("status") => exit_on_error(show_status()),
         Some("peer") => exit_on_error(peer_command(&args[1..])),
+        Some("pair") => exit_on_error(pair_command(&args[1..])),
+        Some("pair-listen") => exit_on_error(pairing::pair_listen()),
         Some("-h" | "--help") => print_help(),
         Some(other) => {
             eprintln!("unknown command: {other}\n");
@@ -252,7 +255,16 @@ fn peer_command(args: &[String]) -> anyhow::Result<()> {
     }
 }
 
-fn load_identity() -> anyhow::Result<Identity> {
+fn pair_command(args: &[String]) -> anyhow::Result<()> {
+    let Some(host) = args.first() else {
+        anyhow::bail!(
+            "usage: continuum pair <host>  (the other device runs `continuum pair-listen`)"
+        );
+    };
+    pairing::pair(host)
+}
+
+pub(crate) fn load_identity() -> anyhow::Result<Identity> {
     let path = continuum_net::default_identity_path()
         .ok_or_else(|| anyhow::anyhow!("could not resolve the config directory"))?;
     Ok(Identity::load_or_generate(&path)?)
