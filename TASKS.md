@@ -44,7 +44,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 - [x] Conflict resolution: LWW by `Version` (Lamport counter, device-id tie-break), stale remotes dropped
 - [x] Multi-device fan-out: broadcast on local change to every connected peer; per-peer send queue
 - [ ] Blob streaming/chunking with per-chunk + whole-payload hash verification; inline small text (<64 KiB)
-- [x] Reconnect + announce: on peer up, the current clipboard is pushed; offline→online re-pairs and syncs (verified mac↔omarchy)
+- [x] Reconnect + announce: on peer up the current clipboard is pushed, and clipboard activity wakes parked reconnect loops; offline→online re-pairs and syncs (verified mac↔omarchy)
 - [x] Peer connection manager: persistent per-peer connection with exponential backoff (keepalive/jitter pending)
 - [x] Headless mode (`--headless`) for servers and testing without a GUI
 

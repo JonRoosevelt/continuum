@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
-use std::thread;
+use std::thread::{self, Thread};
 use std::time::Duration;
 
 use continuum_core::{ClipboardItem, DeviceId};
@@ -27,6 +27,19 @@ pub(crate) struct Slot {
 }
 
 pub(crate) type Registry = Arc<Mutex<HashMap<DeviceId, Slot>>>;
+
+/// Wakes parked reconnect loops so clipboard activity can bring links up immediately.
+pub(crate) struct Waker {
+    threads: Arc<Mutex<Vec<Thread>>>,
+}
+
+impl Waker {
+    pub(crate) fn wake(&self) {
+        for thread in self.threads.lock().expect("waker mutex").iter() {
+            thread.unpark();
+        }
+    }
+}
 
 #[allow(dead_code)]
 #[must_use]
@@ -58,13 +71,14 @@ pub(crate) fn start<E>(
     identity: Arc<Identity>,
     config: &Config,
     on_event: E,
-) -> anyhow::Result<Registry>
+) -> anyhow::Result<(Registry, Waker)>
 where
     E: Fn(NetEvent) + Send + Sync + 'static,
 {
     let registry: Registry = Arc::new(Mutex::new(HashMap::new()));
     let on_event: Arc<dyn Fn(NetEvent) + Send + Sync> = Arc::new(on_event);
     let local_id = identity.device_id();
+    let threads: Arc<Mutex<Vec<Thread>>> = Arc::new(Mutex::new(Vec::new()));
     let allowed: Arc<Vec<Vec<u8>>> = Arc::new(
         config
             .peers
@@ -106,7 +120,9 @@ where
         let registry = Arc::clone(&registry);
         let identity = Arc::clone(&identity);
         let on_event = Arc::clone(&on_event);
+        let threads = Arc::clone(&threads);
         thread::spawn(move || {
+            threads.lock().expect("waker mutex").push(thread::current());
             let mut backoff = RECONNECT_MIN;
             loop {
                 match Peer::connect(&address, &identity, &key) {
@@ -122,13 +138,13 @@ where
                     }
                     Err(err) => tracing::debug!(%name, %err, "connect failed"),
                 }
-                thread::sleep(backoff);
+                thread::park_timeout(backoff);
                 backoff = (backoff * 2).min(RECONNECT_MAX);
             }
         });
     }
 
-    Ok(registry)
+    Ok((registry, Waker { threads }))
 }
 
 /// Registers a connection, resolving duplicates so both peers converge on the same one.

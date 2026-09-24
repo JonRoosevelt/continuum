@@ -48,6 +48,7 @@ impl Recent {
 pub(crate) struct Core {
     pub(crate) monitor: Monitor,
     registry: net::Registry,
+    waker: net::Waker,
     recent: Recent,
     last_version: Option<Version>,
     last_item: Option<ClipboardItem>,
@@ -61,9 +62,11 @@ impl Core {
         on_event: impl Fn(net::NetEvent) + Send + Sync + 'static,
     ) -> anyhow::Result<Self> {
         let device_id = identity.device_id();
+        let (registry, waker) = net::start(Arc::clone(&identity), config, on_event)?;
         Ok(Self {
             monitor: Monitor::open(device_id)?,
-            registry: net::start(Arc::clone(&identity), config, on_event)?,
+            registry,
+            waker,
             recent: Recent::new(),
             last_version: None,
             last_item: None,
@@ -82,6 +85,9 @@ impl Core {
                 );
                 if !self.paused {
                     net::broadcast(&self.registry, &item);
+                    // Clipboard activity also nudges any parked reconnect loops, so links
+                    // come up immediately when a peer has just returned.
+                    self.waker.wake();
                 }
             }
             self.last_item = Some(item);
