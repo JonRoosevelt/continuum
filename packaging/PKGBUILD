@@ -1,6 +1,6 @@
 # Template Arch PKGBUILD. Set url/pkgver before use.
 pkgname=continuum
-pkgver=0.1.1
+pkgver=0.1.2
 pkgrel=1
 pkgdesc="Clipboard sync between macOS and Linux over the LAN"
 arch=('x86_64' 'aarch64')
