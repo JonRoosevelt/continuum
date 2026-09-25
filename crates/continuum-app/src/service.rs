@@ -104,6 +104,10 @@ fn uninstall_platform() -> anyhow::Result<()> {
 
 #[cfg(target_os = "macos")]
 fn macos_plist(exe: &str) -> String {
+    let log = dirs::home_dir()
+        .map(|home| home.join("Library/Logs/continuum.log"))
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "/tmp/continuum.log".to_string());
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
          <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \
@@ -114,6 +118,8 @@ fn macos_plist(exe: &str) -> String {
          \x20 <key>ProgramArguments</key><array><string>{exe}</string></array>\n\
          \x20 <key>RunAtLoad</key><true/>\n\
          <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n\
+         \x20 <key>StandardOutPath</key><string>{log}</string>\n\
+         \x20 <key>StandardErrorPath</key><string>{log}</string>\n\
          </dict>\n\
          </plist>\n"
     )
