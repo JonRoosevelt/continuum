@@ -76,7 +76,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 - [ ] X11 large payload / INCR (Wayland verified; X11 still inline-only)
 - [ ] Latency benchmark harness (detect → write) and idle CPU/memory profiling
 - [ ] Two-device conflict + echo-loop regression tests
-- [ ] Runtime-verify the Linux X11 backend (only Wayland exercised so far)
+- [x] Runtime-verified the Linux X11 backend via XWayland: file read/write (text/uri-list + x-special/gnome-copied-files) using xclip
 
 ## Later (post-v1)
 

@@ -79,11 +79,16 @@ device pins the other's public key into its config and connects on next start.
 {
   "name": "my-laptop",
   "listen": "0.0.0.0:8770",
+  "download_dir": null,
   "peers": [
     { "name": "desktop", "address": "100.x.y.z:8770", "public_key": "<64 hex chars>" }
   ]
 }
 ```
+
+`download_dir` is where received files land (`null` → `~/Downloads/Continuum`); a
+leading `~` and relative paths resolve against your home directory. `continuum
+status` prints the effective folder.
 
 ## Security
 
@@ -121,4 +126,4 @@ not implemented. `continuum put` copies stdin to the clipboard (and holds it).
   Hyprland, niri, COSMIC, labwc, …). **GNOME/Mutter does not expose it** — use an
   X11 session or XWayland. The tray needs an AppIndicator extension on GNOME;
   otherwise run headless and use the CLI.
-- **Linux X11**: supported (compile-checked).
+- **Linux X11**: supported, including files (`text/uri-list` / `x-special/gnome-copied-files`). Set `CONTINUUM_FORCE_X11=1` to force the X11 backend.
