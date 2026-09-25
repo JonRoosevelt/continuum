@@ -279,7 +279,7 @@ checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "continuum-app"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "continuum-core",
@@ -304,7 +304,7 @@ dependencies = [
 
 [[package]]
 name = "continuum-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "blake3",
  "getrandom",
@@ -314,7 +314,7 @@ dependencies = [
 
 [[package]]
 name = "continuum-net"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "bincode",
  "blake3",
@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "continuum-platform"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "continuum-core",
  "dirs 7.0.0",

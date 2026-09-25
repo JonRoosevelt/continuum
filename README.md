@@ -1,100 +1,134 @@
 # Continuum
 
-Tray-only clipboard sync between macOS and Linux over the local network. No cloud,
-no account, no telemetry — copy on one machine and paste on another.
+Clipboard sync between macOS and Linux on your local network. Copy on one machine,
+paste on another — text, images, and files. No cloud, no account, no telemetry.
 
-Status: plain text, images, and files sync between macOS and Linux (Wayland)
-end-to-end over LAN/Tailscale; packaging and more are tracked in
-[TASKS.md](TASKS.md). Received files are written to `~/Downloads/Continuum`
-(never overwritten, ≤100 MB each). HTML/RTF are intentionally **not** synced —
-web apps put styled HTML on the clipboard, and re-offering it corrupts pasted
-text on Linux.
+## What you get
+
+- **Text, images, and files** sync both ways between macOS and Linux.
+- **Lives in the tray / menu bar** — no main window, nothing to babysit.
+- **End-to-end encrypted** with Noise IK; peers are pinned by public key.
+- **Finds peers by itself** on the LAN (mDNS) — no IPs to configure.
+- **LAN-only.** Nothing leaves your network.
+
+Received files are saved to `~/Downloads/Continuum` (never overwritten, ≤100 MB each).
+HTML/RTF are intentionally **not** synced: web apps put styled HTML on the clipboard,
+and re-offering it corrupts pasted text on Linux. Plain text and PNG images are what
+travel.
 
 ## Examples
 
 Copy on one machine, paste on the other.
 
-**Text** — copy text on one device and paste it on the other:
+**Text**
 
 ![Copy text, then paste text on the other device](docs/media/copy-text-then-paste-text.gif)
 
-**Image** — copy an image on one device and paste it on the other:
+**Image**
 
 ![Copy image, then paste image on the other device](docs/media/copy-image-then-paste-image.gif)
 
 Full-quality clips: [text](docs/media/copy-text-then-paste-text.mp4) ·
 [image](docs/media/copy-image-then-paste-image.mp4).
 
-## How it works
+## Install
 
-- Each OS captures clipboard changes (macOS `NSPasteboard`, Linux Wayland
-  data-control / X11 selections) and injects remote content back.
-- Peers talk over an encrypted **Noise IK** TCP connection (`X25519`,
-  `ChaCha20-Poly1305`, `BLAKE2s`) with pinned static keys.
-- Changes are broadcast to every connected peer; `BLAKE3` hashes deduplicate and
-  a Lamport clock resolves conflicts (last-writer-wins).
-- Identity is an `X25519` keypair; `DeviceId = BLAKE3(public key)`.
+### macOS
 
-## Build
+Download `Continuum-X.Y.Z.zip` from [Releases](../../releases), unzip, and move
+`Continuum.app` to `/Applications`. The build is ad-hoc signed, so clear the quarantine
+flag the first time:
 
 ```sh
-cargo build --release                 # tray app (macOS + Linux w/ GTK)
-cargo build --release -p continuum-app --no-default-features   # headless, no GTK
-scripts/bundle-macos.sh               # builds dist/Continuum.app (LSUIElement)
+xattr -dr com.apple.quarantine /Applications/Continuum.app
 ```
 
-## Releases
+Then launch it from Applications. A source build can also register it to start at login
+with `continuum install-service`.
 
-Push a `vX.Y.Z` tag and CI publishes a GitHub Release with
-`Continuum-X.Y.Z.zip` (macOS `.app`, unsigned — see the quarantine note),
-`continuum-X.Y.Z-x86_64-linux.tar.gz`, and `SHA256SUMS`.
+macOS 15.4+ may ask for pasteboard access — allow Continuum if sync stalls.
 
-## Run
+### Linux
+
+The quickest path is a source build, which includes the GTK tray:
 
 ```sh
-continuum                 # tray app
-continuum --headless      # daemon, no GUI
-continuum install-service # launchd (macOS) / systemd user unit (Linux)
-continuum uninstall-service
-scripts/install.sh        # build → ~/.local/bin → install service
+git clone https://github.com/JonRoosevelt/continuum
+cd continuum
+scripts/install.sh
 ```
+
+An Arch `PKGBUILD` is in [`packaging/`](packaging). The prebuilt
+`continuum-X.Y.Z-x86_64-linux.tar.gz` is the **headless** daemon (no tray) — drop it in
+`~/.local/bin` and run it as a service if you don't need a tray.
+
+On Wayland you also need `wl-clipboard`, and the tray needs an AppIndicator /
+StatusNotifier host.
 
 ## Pair two devices
 
-Open the tray menu → **Pair device…**. On the other device either run
-`continuum pair-listen`, or click **Wait for device** in its tray. Both sides
-show the same 6-digit code; confirm on each. The key is pinned and the devices
-reconnect automatically from then on.
+Pairing pins each device's public key, so it only has to be done once.
 
-The same works headless:
+1. Open the tray menu → **Pair device…** on **both** machines. Each starts listening
+   automatically.
+2. In one window, click the other device under **Nearby devices**.
+3. Both windows show the same 6-digit code. Click **Confirm** on one, then on the other.
+
+The devices connect immediately — no restart — and reconnect on their own from then on.
+The code is a short-authentication string: if the two screens don't match, don't confirm.
+
+Prefer the terminal?
 
 ```sh
-continuum pair-listen        # on device A
-continuum pair <A-host>      # on device B
+continuum pair-listen     # on device A
+continuum pair <A-host>   # on device B
 ```
 
-On Linux the firewall must allow inbound TCP **8770** (sync) and **8771** (pairing)
-— e.g. `sudo ufw allow 8770/tcp && sudo ufw allow 8771/tcp`. Devices find each
-other via mDNS, but a firewall that drops inbound TCP will prevent them connecting.
+If **Nearby devices** stays empty (mDNS blocked on your network), pairing still works:
+type the other device's IP into the box and click **Pair** on one side while the other is
+listening.
 
-## CLI
+## Everyday use
 
-| command | purpose |
-| --- | --- |
-| `continuum show-id` | print this device's id and public key |
-| `continuum status` | config path, listen address, paired peers |
-| `continuum peer add <name> <host:port> <public_key_hex>` | manual pairing |
-| `continuum peer list` | list peers |
-| `continuum dump` | print current clipboard representations (debug) |
-| `continuum pair <host>` / `pair-listen` | interactive pairing |
-| `continuum install-service` / `uninstall-service` | login/autostart service |
+The tray menu:
 
-## Config
+- **Continuum — connected** — status line
+- **Pause sync** — stop sending and receiving without quitting
+- **Send clipboard now** — re-send the current clipboard
+- **Pair device…** — pair, see connection state, or unpair
+- **Quit Continuum**
 
-- macOS: `~/Library/Application Support/continuum/`
-- Linux: `~/.config/continuum/`
+Then just copy as usual; the other machine has it within a moment.
 
-`config.json`:
+## Troubleshooting
+
+**Devices don't find each other.** Usually a firewall. Allow inbound TCP **8770** (sync)
+and **8771** (pairing):
+
+```sh
+sudo ufw allow 8770/tcp && sudo ufw allow 8771/tcp
+```
+
+**Pairing says "Connection refused".** The other device wasn't listening yet — open
+**Pair device…** on both before clicking a nearby device.
+
+**The pairing window says "Connecting…" and never "Connected".** It updates within a
+second or two once the link comes up. If it stays stuck, check that the other machine is
+running and the firewall above is open.
+
+**Pasted text/images look wrong on Linux.** Only plain text and PNG images are synced;
+rich HTML/RTF is deliberately dropped.
+
+**Over a VPN (Tailscale, WireGuard).** mDNS doesn't cross the tunnel, so give the peer a
+fixed address (see [Configuration](#configuration)) or pair by IP.
+
+**Linux: no tray icon.** You need an AppIndicator / StatusNotifier host (on GNOME, the
+AppIndicator extension). Otherwise run `continuum --headless` and use the CLI.
+
+## Configuration
+
+- macOS: `~/Library/Application Support/continuum/config.json`
+- Linux: `~/.config/continuum/config.json`
 
 ```json
 {
@@ -107,49 +141,80 @@ other via mDNS, but a firewall that drops inbound TCP will prevent them connecti
 }
 ```
 
-`download_dir` is where received files land (`null` → `~/Downloads/Continuum`); a
-leading `~` and relative paths resolve against your home directory. `continuum
-status` prints the effective folder.
+- **`address`** — optional. Leave `null` on a LAN: mDNS finds the peer and the connection
+  survives IP changes. Set `host:port` only when multicast is blocked or over a VPN.
+- **`download_dir`** — where received files go; `null` → `~/Downloads/Continuum`. A leading
+  `~` and relative paths resolve against your home directory. `continuum status` prints the
+  effective path.
 
-`address` is optional: on the same LAN devices find each other automatically via
-mDNS (`_continuum._tcp`), so pairing needs no IP and the connection survives IP
-changes. Set it to a fixed `host:port` only as a fallback — e.g. when multicast is
-blocked, or over a VPN such as Tailscale (mDNS does not traverse a tailnet).
+## CLI
 
-## Security
+| command | purpose |
+| --- | --- |
+| `continuum` | run the tray app |
+| `continuum --headless` | run without a GUI |
+| `continuum status` | config path, listen address, peers, download dir |
+| `continuum show-id` | print this device's id and public key |
+| `continuum pair <host>` / `pair-listen` | interactive pairing |
+| `continuum peer list` | list paired peers |
+| `continuum peer remove <name\|short-id>` | unpair |
+| `continuum peer add <name> <host:port> <public_key_hex>` | manual pairing |
+| `continuum dump` | print the current clipboard representations (debug) |
+| `continuum put` | copy stdin to the clipboard and hold it |
+| `continuum install-service` / `uninstall-service` | start at login (launchd / systemd) |
+
+## How it works
+
+- Each OS watches clipboard changes (macOS `NSPasteboard`; Linux Wayland data-control /
+  X11 selections) and writes remote content back.
+- Peers talk over an encrypted **Noise IK** TCP connection (`X25519`, `ChaCha20-Poly1305`,
+  `BLAKE2s`), with static keys pinned in config.
+- Changes are broadcast to every connected peer; `BLAKE3` hashes deduplicate and a Lamport
+  clock resolves conflicts (last writer wins).
+- Identity is an `X25519` keypair; `DeviceId = BLAKE3(public key)`.
+- Devices advertise and discover over mDNS `_continuum._tcp.local.`.
+
+## Security & privacy
 
 - LAN-only; no cloud, account, or telemetry.
-- Every payload is end-to-end encrypted with Noise; a peer is only trusted if its
-  static key is pinned in config (pairing, or `peer add`).
-- Pairing uses a Noise XX handshake plus a 6-digit short authentication string
-  that both devices must match, defeating a man-in-the-middle.
-- Images are normalized to PNG (a macOS-only TIFF is converted) so they interoperate with Linux.
-- Sensitive content is skipped by default (`org.nspasteboard` transient/concealed/
-  auto-generated, `com.apple.is-remote-clipboard`, `x-kde-passwordManagerHint`).
-- Clipboard content is never written to disk (no history in v1); copied **files**
-  are the exception — they arrive in `~/Downloads/Continuum` and are never
-  overwritten (a numeric suffix is added on collision).
+- Every payload is end-to-end encrypted; a peer is trusted only if its static key is
+  pinned in config.
+- Pairing adds a 6-digit short-authentication string that both devices must match,
+  defeating a man-in-the-middle.
+- Sensitive clipboard content is skipped: `org.nspasteboard` transient/concealed/
+  auto-generated, `com.apple.is-remote-clipboard`, `x-kde-passwordManagerHint`.
+- Clipboard content is never written to disk. Copied **files** are the exception — they
+  land in `~/Downloads/Continuum` and are never overwritten (a numeric suffix is added on
+  collision).
 
-Known gaps: the identity key is stored as a `0600` file, not yet in the OS
-keychain / libsecret. On Wayland, payloads above 48 KiB are written via `wl-copy`
-(wl-clipboard-rs truncates large clipboard writes); X11 large payload / INCR is
-not implemented. `continuum put` copies stdin to the clipboard (and holds it).
+Known gaps: the identity key is stored as a `0600` file, not yet in the OS keychain /
+libsecret; on Wayland, clipboard writes above 48 KiB go through `wl-copy` (wl-clipboard-rs
+truncates large writes) and X11 large-payload / INCR is not implemented.
 
 ## Platform notes
 
-- **macOS**: menu-bar-only app (`LSUIElement`). `scripts/bundle-macos.sh` ad-hoc
-  signs for local use; notarization is only needed to distribute a prebuilt app.
-  A downloaded, ad-hoc-signed build is blocked by Gatekeeper — clear the
-  quarantine flag or right-click → Open:
+- **macOS.** Menu-bar-only (`LSUIElement`). A downloaded, ad-hoc-signed build is blocked by
+  Gatekeeper — clear the quarantine flag (above) or right-click → Open.
+- **Linux Wayland.** Works on compositors that expose data-control (KDE, Sway, Hyprland,
+  niri, COSMIC, labwc, …). **GNOME/Mutter does not expose it** — use an X11 session or
+  XWayland.
+- **Linux X11.** Supported, including files. Set `CONTINUUM_FORCE_X11=1` to force the X11
+  backend.
 
-  ```
-  xattr -dr com.apple.quarantine /Applications/Continuum.app
-  ```
+## Build from source
 
-  macOS 15.4+ may ask for pasteboard access — allow Continuum in System Settings
-  if sync stalls.
-- **Linux Wayland**: works on compositors exposing data-control (KDE, Sway,
-  Hyprland, niri, COSMIC, labwc, …). **GNOME/Mutter does not expose it** — use an
-  X11 session or XWayland. The tray needs an AppIndicator extension on GNOME;
-  otherwise run headless and use the CLI.
-- **Linux X11**: supported, including files (`text/uri-list` / `x-special/gnome-copied-files`). Set `CONTINUUM_FORCE_X11=1` to force the X11 backend.
+```sh
+cargo build --release                                          # tray app (macOS + Linux w/ GTK)
+cargo build --release -p continuum-app --no-default-features   # headless, no GTK
+scripts/bundle-macos.sh                                        # dist/Continuum.app (LSUIElement)
+```
+
+## Releases
+
+Push a `vX.Y.Z` tag and CI publishes a GitHub Release with:
+
+- `Continuum-X.Y.Z.zip` — macOS `.app` (unsigned, ad-hoc signed for local use)
+- `continuum-X.Y.Z-x86_64-linux.tar.gz` — headless Linux binary
+- `SHA256SUMS`
+
+Released under the MIT license.
