@@ -65,6 +65,8 @@ pub fn run() {
             Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
                 #[cfg(target_os = "macos")]
                 crate::hud::tick();
+                #[cfg(target_os = "macos")]
+                crate::pairing_window::poll();
                 if let Some(app) = app.as_mut() {
                     if let Err(err) = app.core.poll() {
                         tracing::warn!(%err, "clipboard poll failed");
@@ -98,7 +100,10 @@ fn handle_action(app: &mut App, action: TrayAction, control_flow: &mut ControlFl
         }
         TrayAction::SendNow => app.core.send_now(),
         TrayAction::Pair => {
-            tracing::info!("run `continuum pair <host:port>` on this machine to pair a device")
+            #[cfg(target_os = "macos")]
+            crate::pairing_window::open();
+            #[cfg(not(target_os = "macos"))]
+            tracing::info!("run `continuum pair <host:port>` on this machine to pair a device");
         }
         TrayAction::Quit => *control_flow = ControlFlow::Exit,
         TrayAction::None => {}

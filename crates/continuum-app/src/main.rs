@@ -7,6 +7,8 @@ mod monitor;
 mod net;
 mod notify;
 mod pairing;
+#[cfg(all(target_os = "macos", feature = "tray"))]
+mod pairing_window;
 mod service;
 #[cfg(feature = "tray")]
 mod tray;
