@@ -24,20 +24,28 @@ fn human(size: u64) -> String {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn show(message: &str) {
+    tracing::info!(%message, "notification");
+    spawn_notification(message);
+}
+
+#[cfg(target_os = "linux")]
+fn spawn_notification(message: &str) {
     use std::process::Command;
 
     let clean = message.replace('"', "'");
     let mut command = Command::new("hyprctl");
-    command.args(["notify", "-1", "3000", "rgb(00d4aa)", &clean]);
+    command.args(["notify", "-1", "5000", "rgb(00d4aa)", &clean]);
     if let Some(signature) = hyprland_signature() {
         command.env("HYPRLAND_INSTANCE_SIGNATURE", signature);
     }
     if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
         command.env("XDG_RUNTIME_DIR", runtime);
     }
-    let _ = command.spawn();
+    match command.spawn() {
+        Ok(_) => {}
+        Err(err) => tracing::warn!(%err, "could not spawn hyprctl"),
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -53,7 +61,7 @@ fn hyprland_signature() -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn show(message: &str) {
+fn spawn_notification(message: &str) {
     use std::process::Command;
 
     let script = format!(
@@ -64,4 +72,4 @@ fn show(message: &str) {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn show(_message: &str) {}
+fn spawn_notification(_message: &str) {}
