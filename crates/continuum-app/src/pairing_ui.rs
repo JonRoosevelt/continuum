@@ -52,6 +52,18 @@ struct PairingWindow {
 
 thread_local! {
     static WINDOW: RefCell<Option<PairingWindow>> = const { RefCell::new(None) };
+    static PAIRED: RefCell<Vec<PeerConfig>> = const { RefCell::new(Vec::new()) };
+    static UNPAIRED: RefCell<Vec<DeviceId>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Drains peers paired since the last call so the runtime can connect them immediately.
+pub fn take_paired() -> Vec<PeerConfig> {
+    PAIRED.with(|cell| std::mem::take(&mut *cell.borrow_mut()))
+}
+
+/// Drains devices unpaired since the last call so the runtime can drop their links.
+pub fn take_unpaired() -> Vec<DeviceId> {
+    UNPAIRED.with(|cell| std::mem::take(&mut *cell.borrow_mut()))
 }
 
 pub fn open(map: AddressMap, paired: Vec<DeviceId>) {
@@ -278,10 +290,8 @@ impl PairingWindow {
                 match pairing::save_peer(&peer) {
                     Ok(()) => {
                         tracing::info!(peer = %peer.name, address = %peer.display_address(), "paired device");
-                        self.set_status(&format!(
-                            "Paired with {}. Restart Continuum to connect.",
-                            peer.name
-                        ));
+                        PAIRED.with(|cell| cell.borrow_mut().push(peer.clone()));
+                        self.set_status(&format!("Paired with {}. Connecting…", peer.name));
                     }
                     Err(err) => {
                         tracing::warn!(%err, "failed to save paired device");
@@ -467,9 +477,10 @@ fn on_unpair(id: DeviceId) {
     with_window(|window| match pairing::forget_peer(id) {
         Ok(name) => {
             tracing::info!(%name, "unpaired device");
+            UNPAIRED.with(|cell| cell.borrow_mut().push(id));
             window.paired.retain(|paired| *paired != id);
             window.set_status(&format!(
-                "Unpaired {name}. Restart Continuum to disconnect. Also unpair there if you want to fully remove it."
+                "Unpaired {name}. Also unpair there if you want to fully remove it."
             ));
             window.nearby.clear();
             window.refresh_nearby();
@@ -489,7 +500,7 @@ fn on_confirm() {
         if let Some(decision) = &window.decision {
             let _ = decision.send(Decision::Confirm);
         }
-        window.set_status("Confirming…");
+        window.set_status("Confirmed. Click Confirm on the other device to finish.");
         window.set_interactive(false, false, false);
     });
 }

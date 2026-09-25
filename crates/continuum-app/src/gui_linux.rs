@@ -66,13 +66,19 @@ fn tick(app: &Rc<RefCell<App>>, receiver: &mpsc::Receiver<NetEvent>) {
         app.borrow_mut().core.handle_event(event);
     }
 
+    pairing_ui::poll();
     {
         let mut app = app.borrow_mut();
+        for peer in pairing_ui::take_paired() {
+            app.core.add_peer(peer);
+        }
+        for device in pairing_ui::take_unpaired() {
+            app.core.remove_device(device);
+        }
         if let Err(err) = app.core.poll() {
             tracing::warn!(%err, "clipboard poll failed");
         }
     }
-    pairing_ui::poll();
     update_status(app);
 }
 

@@ -68,6 +68,12 @@ pub fn run() {
                 #[cfg(target_os = "macos")]
                 crate::pairing_window::poll();
                 if let Some(app) = app.as_mut() {
+                    for peer in crate::pairing_window::take_paired() {
+                        app.core.add_peer(peer);
+                    }
+                    for device in crate::pairing_window::take_unpaired() {
+                        app.core.remove_device(device);
+                    }
                     if let Err(err) = app.core.poll() {
                         tracing::warn!(%err, "clipboard poll failed");
                     }

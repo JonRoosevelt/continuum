@@ -30,6 +30,7 @@ pub(crate) struct Core {
     pub(crate) monitor: Monitor,
     registry: net::Registry,
     waker: net::Waker,
+    handle: net::NetHandle,
     discovery: Option<discovery::Discovery>,
     discovered: discovery::AddressMap,
     peers: Vec<config::PeerConfig>,
@@ -59,7 +60,7 @@ impl Core {
                 }
             }
         });
-        let (registry, waker) = net::start(
+        let (registry, waker, handle) = net::start(
             Arc::clone(&identity),
             config,
             Arc::clone(&addresses),
@@ -70,6 +71,7 @@ impl Core {
             monitor: Monitor::open(device_id)?,
             registry,
             waker,
+            handle,
             discovery,
             discovered: addresses,
             peers: config.peers.clone(),
@@ -216,6 +218,31 @@ impl Core {
     #[allow(dead_code)]
     pub(crate) fn set_paused(&mut self, paused: bool) {
         self.paused = paused;
+    }
+
+    /// Brings a freshly paired peer online without restarting the process.
+    #[allow(dead_code)]
+    pub(crate) fn add_peer(&mut self, peer: config::PeerConfig) {
+        if self
+            .peers
+            .iter()
+            .any(|existing| existing.public_key == peer.public_key)
+        {
+            return;
+        }
+        self.handle.add_peer(&peer);
+        self.peers.push(peer);
+    }
+
+    /// Drops a peer's link and stops dialing it, without restarting the process.
+    #[allow(dead_code)]
+    pub(crate) fn remove_device(&mut self, device: DeviceId) {
+        self.handle.remove_peer(device);
+        self.peers.retain(|peer| {
+            hex::decode(&peer.public_key)
+                .map(|key| continuum_net::device_id_from_public(&key) != device)
+                .unwrap_or(true)
+        });
     }
 }
 
