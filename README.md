@@ -25,6 +25,12 @@ cargo build --release -p continuum-app --no-default-features   # headless, no GT
 scripts/bundle-macos.sh               # builds dist/Continuum.app (LSUIElement)
 ```
 
+## Releases
+
+Push a `vX.Y.Z` tag and CI publishes a GitHub Release with
+`Continuum-X.Y.Z.zip` (macOS `.app`, unsigned — see the quarantine note),
+`continuum-X.Y.Z-x86_64-linux.tar.gz`, and `SHA256SUMS`.
+
 ## Run
 
 ```sh

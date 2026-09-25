@@ -4,23 +4,56 @@ on:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: write
+
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            flags: ""
-          - os: ubuntu-latest
-            flags: "--no-default-features"
-    runs-on: ${{ matrix.os }}
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: bundle app
+        run: bash scripts/bundle-macos.sh
+      - name: package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cd dist && zip -q -r "../Continuum-${VERSION}.zip" Continuum.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: Continuum-*.zip
+
+  build-linux:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: build
-        run: cargo build --release -p continuum-app ${{ matrix.flags }}
+        run: cargo build --release --no-default-features -p continuum-app
+      - name: package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p pkg
+          cp target/release/continuum pkg/
+          tar -C pkg -czf "continuum-${VERSION}-x86_64-linux.tar.gz" continuum
       - uses: actions/upload-artifact@v4
         with:
-          name: continuum-${{ matrix.os }}
-          path: target/release/continuum
+          name: linux
+          path: continuum-*.tar.gz
+
+  release:
+    needs: [build-macos, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: checksums
+        run: sha256sum ./*.zip ./*.tar.gz > SHA256SUMS
+      - name: publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --generate-notes -R "$GITHUB_REPOSITORY" \
+            ./*.zip ./*.tar.gz SHA256SUMS
