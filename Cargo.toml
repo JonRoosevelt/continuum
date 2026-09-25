@@ -12,6 +12,8 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
 license = "MIT"
+repository = "https://github.com/JonRoosevelt/continuum"
+homepage = "https://github.com/JonRoosevelt/continuum"
 description = "Tray-only clipboard sync between macOS and Linux over the LAN"
 
 [workspace.dependencies]
