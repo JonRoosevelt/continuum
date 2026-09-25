@@ -51,8 +51,32 @@ fn install_platform() -> anyhow::Result<()> {
     std::fs::write(&path, systemd_unit(&exe))?;
     run("systemctl", &["--user", "daemon-reload"]);
     run("systemctl", &["--user", "enable", "--now", "continuum"]);
+    open_firewall_ports();
     println!("installed systemd user unit at {}", path.display());
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn open_firewall_ports() {
+    let ufw_enabled = std::fs::read_to_string("/etc/ufw/ufw.conf")
+        .map(|conf| conf.contains("ENABLED=yes"))
+        .unwrap_or(false);
+    if !ufw_enabled {
+        return;
+    }
+    for port in ["8770/tcp", "8771/tcp"] {
+        if !run_sudo(&["ufw", "allow", port]) {
+            eprintln!("warning: allow the firewall manually: sudo ufw allow {port}");
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn run_sudo(args: &[&str]) -> bool {
+    match Command::new("sudo").arg("-n").args(args).status() {
+        Ok(status) => status.success(),
+        Err(_) => false,
+    }
 }
 
 #[cfg(target_os = "linux")]
