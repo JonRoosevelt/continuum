@@ -162,6 +162,7 @@ mod tests {
     use objc2_app_kit::NSPasteboardTypeString;
 
     #[test]
+    #[ignore = "touches the real pasteboard; run locally with --ignored"]
     #[allow(unsafe_code)]
     fn roundtrips_plain_text() {
         let pasteboard = NSPasteboard::generalPasteboard();
@@ -192,6 +193,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "touches the real pasteboard; run locally with --ignored"]
     #[allow(unsafe_code)]
     fn roundtrips_multiple_items() {
         let pasteboard = NSPasteboard::generalPasteboard();

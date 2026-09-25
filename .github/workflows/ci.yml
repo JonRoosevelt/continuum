@@ -10,7 +10,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        include:
+          - os: macos-latest
+            flags: ""
+          - os: ubuntu-latest
+            flags: "--no-default-features"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -20,9 +24,9 @@ jobs:
       - name: fmt
         run: cargo fmt --all -- --check
       - name: clippy
-        run: cargo clippy --all-targets --workspace -- -D warnings
+        run: cargo clippy --all-targets --workspace ${{ matrix.flags }} -- -D warnings
       - name: test
-        run: cargo test --workspace
+        run: cargo test --workspace ${{ matrix.flags }}
       - name: headless build (no GTK)
         if: matrix.os == 'ubuntu-latest'
         run: cargo build -p continuum-app --no-default-features
