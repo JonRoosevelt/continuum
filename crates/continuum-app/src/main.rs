@@ -15,6 +15,7 @@ mod service;
 mod tray;
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::{mpsc, Arc, Mutex};
 
 use continuum_core::{ClipboardItem, DeviceId, Version};
@@ -25,7 +26,9 @@ pub(crate) struct Core {
     pub(crate) monitor: Monitor,
     registry: net::Registry,
     waker: net::Waker,
-    _discovery: Option<discovery::Discovery>,
+    discovery: Option<discovery::Discovery>,
+    discovered: discovery::AddressMap,
+    peers: Vec<config::PeerConfig>,
     last_version: Option<Version>,
     last_item: Option<ClipboardItem>,
     paused: bool,
@@ -52,13 +55,20 @@ impl Core {
                 }
             }
         });
-        let (registry, waker) =
-            net::start(Arc::clone(&identity), config, addresses, waker, on_event)?;
+        let (registry, waker) = net::start(
+            Arc::clone(&identity),
+            config,
+            Arc::clone(&addresses),
+            waker,
+            on_event,
+        )?;
         Ok(Self {
             monitor: Monitor::open(device_id)?,
             registry,
             waker,
-            _discovery: discovery,
+            discovery,
+            discovered: addresses,
+            peers: config.peers.clone(),
             last_version: None,
             last_item: None,
             paused: false,
@@ -166,6 +176,31 @@ impl Core {
     #[allow(dead_code)]
     pub(crate) fn peer_count(&self) -> usize {
         net::peer_count(&self.registry)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn discovered_addresses(&self) -> Vec<(DeviceId, SocketAddr)> {
+        self.discovery
+            .as_ref()
+            .map(discovery::Discovery::discovered)
+            .unwrap_or_default()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn discovered_map(&self) -> discovery::AddressMap {
+        Arc::clone(&self.discovered)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn paired_device_ids(&self) -> Vec<DeviceId> {
+        self.peers
+            .iter()
+            .filter_map(|peer| {
+                hex::decode(&peer.public_key)
+                    .ok()
+                    .map(|key| continuum_net::device_id_from_public(&key))
+            })
+            .collect()
     }
 
     #[must_use]

@@ -19,7 +19,6 @@ pub(crate) struct Discovery {
 }
 
 impl Discovery {
-    #[allow(dead_code)]
     pub(crate) fn discovered(&self) -> Vec<(DeviceId, SocketAddr)> {
         self.addresses
             .lock()

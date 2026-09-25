@@ -101,7 +101,11 @@ fn handle_action(app: &mut App, action: TrayAction, control_flow: &mut ControlFl
         TrayAction::SendNow => app.core.send_now(),
         TrayAction::Pair => {
             #[cfg(target_os = "macos")]
-            crate::pairing_window::open();
+            crate::pairing_window::open(
+                app.core.discovered_addresses(),
+                app.core.paired_device_ids(),
+                app.core.discovered_map(),
+            );
             #[cfg(not(target_os = "macos"))]
             tracing::info!("run `continuum pair <host:port>` on this machine to pair a device");
         }
