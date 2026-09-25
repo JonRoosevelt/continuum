@@ -200,7 +200,7 @@ impl PairingWindow {
             .lock()
             .map(|map| map.iter().map(|(id, addr)| (*id, *addr)).collect())
             .unwrap_or_default();
-        filter_nearby(entries, &self.paired, self.local)
+        filter_nearby(entries, self.local)
     }
 
     fn refresh_nearby(&mut self) {
@@ -215,14 +215,26 @@ impl PairingWindow {
         }
 
         for (id, address) in self.nearby.iter().take(MAX_ROWS).copied() {
-            let title = format!("{}  ·  {address}", id.short());
+            let paired = self.paired.contains(&id);
+            let mut title = format!("{}  ·  {address}", id.short());
+            if paired {
+                title.push_str("  (paired)");
+            }
             let row = gtk::ListBoxRow::new();
+            let container = gtk::Box::new(gtk::Orientation::Horizontal, 6);
             let button = gtk::Button::with_label(&title);
             button.set_relief(gtk::ReliefStyle::None);
             button.set_halign(gtk::Align::Start);
+            button.set_hexpand(true);
             let host = address.ip().to_string();
             button.connect_clicked(move |_| on_device(host.clone()));
-            row.add(&button);
+            container.pack_start(&button, true, true, 0);
+            if paired {
+                let unpair = gtk::Button::with_label("Unpair");
+                unpair.connect_clicked(move |_| on_unpair(id));
+                container.pack_start(&unpair, false, false, 0);
+            }
+            row.add(&container);
             self.nearby_list.add(&row);
             row.show_all();
         }
@@ -404,6 +416,23 @@ fn on_device(host: String) {
     });
 }
 
+fn on_unpair(id: DeviceId) {
+    with_window(|window| match pairing::forget_peer(id) {
+        Ok(name) => {
+            window.paired.retain(|paired| *paired != id);
+            window.set_status(&format!(
+                "Unpaired {name}. Restart Continuum to disconnect. Also unpair there if you want to fully remove it."
+            ));
+            window.nearby.clear();
+            window.refresh_nearby();
+        }
+        Err(err) => {
+            tracing::warn!(%err, "failed to unpair device");
+            window.set_status(&format!("Could not unpair: {err}"));
+        }
+    });
+}
+
 fn on_confirm() {
     with_window(|window| {
         if !window.active {
@@ -443,12 +472,11 @@ fn with_window(f: impl FnOnce(&mut PairingWindow)) {
 
 fn filter_nearby(
     entries: Vec<(DeviceId, SocketAddr)>,
-    paired: &[DeviceId],
     local: Option<DeviceId>,
 ) -> Vec<(DeviceId, SocketAddr)> {
     let mut entries: Vec<_> = entries
         .into_iter()
-        .filter(|(id, _)| !paired.contains(id) && Some(*id) != local)
+        .filter(|(id, _)| Some(*id) != local)
         .collect();
     entries.sort();
     entries

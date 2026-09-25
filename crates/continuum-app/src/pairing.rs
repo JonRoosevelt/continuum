@@ -3,6 +3,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use continuum_core::DeviceId;
 use continuum_net::device_id_from_public;
 use continuum_net::noise::{short_authentication_string, xx_initiate, xx_respond, Session};
 use continuum_net::Identity;
@@ -238,6 +239,18 @@ pub fn save_peer(peer: &PeerConfig) -> anyhow::Result<()> {
     config.upsert_peer(peer.clone());
     config.save(&path)?;
     Ok(())
+}
+
+#[allow(dead_code)]
+pub fn forget_peer(id: DeviceId) -> anyhow::Result<String> {
+    let path = crate::config::default_config_path()
+        .ok_or_else(|| anyhow::anyhow!("could not resolve the config directory"))?;
+    let mut config = Config::load_or_create(&path)?;
+    let peer = config
+        .remove_peer(&id.short())
+        .ok_or_else(|| anyhow::anyhow!("peer not found in config"))?;
+    config.save(&path)?;
+    Ok(peer.name)
 }
 
 fn local_name(identity: &Identity) -> String {

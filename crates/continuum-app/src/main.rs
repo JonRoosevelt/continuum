@@ -364,6 +364,22 @@ fn peer_command(args: &[String]) -> anyhow::Result<()> {
             Ok(())
         }
         Some("list") | None => show_status(),
+        Some("remove") => {
+            let [_, query] = args else {
+                anyhow::bail!("usage: continuum peer remove <name|short-id>");
+            };
+            let path = config::default_config_path()
+                .ok_or_else(|| anyhow::anyhow!("could not resolve the config directory"))?;
+            let mut config = config::Config::load_or_create(&path)?;
+            match config.remove_peer(query) {
+                Some(peer) => {
+                    config.save(&path)?;
+                    println!("removed peer {}", peer.name);
+                    Ok(())
+                }
+                None => anyhow::bail!("no peer matching {query}"),
+            }
+        }
         Some(other) => anyhow::bail!("unknown peer subcommand: {other}"),
     }
 }
@@ -431,6 +447,7 @@ fn print_help() {
          continuum put             copy stdin to the clipboard and hold it\n  \
          continuum peer add <name> <host:port> <public_key_hex>\n  \
          continuum peer list\n  \
+         continuum peer remove <name|short-id>\n  \
          continuum pair <host>      pair with a device running `pair-listen`\n  \
          continuum pair-listen      accept a pairing request\n  \
          continuum install-service / uninstall-service\n  \

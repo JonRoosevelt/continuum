@@ -77,6 +77,22 @@ impl Config {
             self.peers.push(peer);
         }
     }
+
+    /// Removes the peer matching `query` by name (case-insensitive), full public key,
+    /// or short device id, returning it if found.
+    pub fn remove_peer(&mut self, query: &str) -> Option<PeerConfig> {
+        let index = self.peers.iter().position(|peer| {
+            peer.name.eq_ignore_ascii_case(query)
+                || peer.public_key == query
+                || peer_short(&peer.public_key).is_some_and(|short| short == query)
+        })?;
+        Some(self.peers.remove(index))
+    }
+}
+
+fn peer_short(public_key: &str) -> Option<String> {
+    let key = hex::decode(public_key).ok()?;
+    Some(continuum_net::device_id_from_public(&key).short())
 }
 
 #[must_use]

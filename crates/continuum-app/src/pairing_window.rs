@@ -26,6 +26,7 @@ const MARGIN: f64 = 20.0;
 const CONTENT_WIDTH: f64 = WIDTH - MARGIN * 2.0;
 const MAX_ROWS: usize = 4;
 const ROW_HEIGHT: f64 = 24.0;
+const UNPAIR_WIDTH: f64 = 70.0;
 
 enum UiEvent {
     Code(String),
@@ -47,6 +48,7 @@ struct PairingWindow {
     nearby_label: Retained<NSTextField>,
     nearby_note: Retained<NSTextField>,
     nearby_rows: Vec<Retained<NSButton>>,
+    unpair_rows: Vec<Retained<NSButton>>,
     nearby: Vec<(DeviceId, SocketAddr)>,
     map: AddressMap,
     paired: Vec<DeviceId>,
@@ -89,6 +91,11 @@ define_class!(
             on_device(sender);
         }
 
+        #[unsafe(method(unpairClicked:))]
+        fn unpair_clicked(&self, sender: &AnyObject) {
+            on_unpair(sender);
+        }
+
         #[unsafe(method(confirmClicked:))]
         fn confirm_clicked(&self, _sender: &AnyObject) {
             on_confirm();
@@ -127,7 +134,7 @@ pub fn open(discovered: Vec<(DeviceId, SocketAddr)>, paired: Vec<DeviceId>, map:
         // nearby list on every open; otherwise a device paired when the window was
         // first created stays filtered out.
         window.paired = paired;
-        let entries = filter_nearby(discovered, &window.paired, window.local);
+        let entries = filter_nearby(discovered, window.local);
         window.refresh_nearby(mtm, entries);
         window.window.makeKeyAndOrderFront(None);
         // An accessory app is normally inactive, so the text field will not accept
@@ -292,6 +299,7 @@ impl PairingWindow {
             nearby_label,
             nearby_note,
             nearby_rows: Vec::new(),
+            unpair_rows: Vec::new(),
             nearby: Vec::new(),
             map,
             paired,
@@ -316,7 +324,7 @@ impl PairingWindow {
             .lock()
             .map(|map| map.iter().map(|(id, addr)| (*id, *addr)).collect())
             .unwrap_or_default();
-        filter_nearby(entries, &self.paired, self.local)
+        filter_nearby(entries, self.local)
     }
 
     fn refresh_nearby(&mut self, mtm: MainThreadMarker, entries: Vec<(DeviceId, SocketAddr)>) {
@@ -327,18 +335,41 @@ impl PairingWindow {
         for row in self.nearby_rows.drain(..) {
             row.removeFromSuperview();
         }
+        for row in self.unpair_rows.drain(..) {
+            row.removeFromSuperview();
+        }
 
         if let Some(content) = self.window.contentView() {
             for index in 0..self.nearby.len().min(MAX_ROWS) {
                 let (id, address) = self.nearby[index];
-                let title = format!("{}  ·  {address}", id.short());
+                let paired = self.paired.contains(&id);
+                let mut title = format!("{}  ·  {address}", id.short());
+                if paired {
+                    title.push_str("  (paired)");
+                }
+                let y = HEIGHT - 112.0 - index as f64 * ROW_HEIGHT;
+                let row_width = if paired {
+                    CONTENT_WIDTH - UNPAIR_WIDTH - 4.0
+                } else {
+                    CONTENT_WIDTH
+                };
                 let row = device_button(mtm, &title, &self.target, index);
                 row.setFrame(NSRect::new(
-                    NSPoint::new(MARGIN, HEIGHT - 112.0 - index as f64 * ROW_HEIGHT),
-                    NSSize::new(CONTENT_WIDTH, ROW_HEIGHT),
+                    NSPoint::new(MARGIN, y),
+                    NSSize::new(row_width, ROW_HEIGHT),
                 ));
                 content.addSubview(&row);
                 self.nearby_rows.push(row);
+
+                if paired {
+                    let unpair = unpair_button(mtm, &self.target, index);
+                    unpair.setFrame(NSRect::new(
+                        NSPoint::new(MARGIN + CONTENT_WIDTH - UNPAIR_WIDTH, y),
+                        NSSize::new(UNPAIR_WIDTH, ROW_HEIGHT),
+                    ));
+                    content.addSubview(&unpair);
+                    self.unpair_rows.push(unpair);
+                }
             }
         }
 
@@ -525,6 +556,33 @@ fn on_device(sender: &AnyObject) {
     });
 }
 
+fn on_unpair(sender: &AnyObject) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let tag: isize = unsafe { msg_send![sender, tag] };
+    with_window(|window| {
+        let Some((id, _)) = window.nearby.get(tag.max(0) as usize).copied() else {
+            return;
+        };
+        match pairing::forget_peer(id) {
+            Ok(name) => {
+                window.paired.retain(|paired| *paired != id);
+                window.set_status(&format!(
+                    "Unpaired {name}. Restart Continuum to disconnect. Also unpair there if you want to fully remove it."
+                ));
+                let entries = window.current_nearby();
+                window.nearby.clear();
+                window.refresh_nearby(mtm, entries);
+            }
+            Err(err) => {
+                tracing::warn!(%err, "failed to unpair device");
+                window.set_status(&format!("Could not unpair: {err}"));
+            }
+        }
+    });
+}
+
 fn on_confirm() {
     with_window(|window| {
         if !window.active {
@@ -599,14 +657,20 @@ fn device_button(
     button
 }
 
+fn unpair_button(mtm: MainThreadMarker, target: &PairingTarget, tag: usize) -> Retained<NSButton> {
+    let button = button(mtm, "Unpair", sel!(unpairClicked:), target);
+    button.setTag(tag as isize);
+    button.setFont(Some(&NSFont::systemFontOfSize(11.0)));
+    button
+}
+
 fn filter_nearby(
     entries: Vec<(DeviceId, SocketAddr)>,
-    paired: &[DeviceId],
     local: Option<DeviceId>,
 ) -> Vec<(DeviceId, SocketAddr)> {
     let mut entries: Vec<_> = entries
         .into_iter()
-        .filter(|(id, _)| !paired.contains(id) && Some(*id) != local)
+        .filter(|(id, _)| Some(*id) != local)
         .collect();
     entries.sort();
     entries
