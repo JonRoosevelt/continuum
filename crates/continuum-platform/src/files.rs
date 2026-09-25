@@ -5,6 +5,7 @@ use continuum_core::Representation;
 
 pub const FILE_MIME: &str = "application/x-continuum-file";
 pub const URI_LIST_MIME: &str = "text/uri-list";
+pub const GNOME_COPIED_FILES_MIME: &str = "x-special/gnome-copied-files";
 pub const MAX_FILE_BYTES: u64 = 100 * 1024 * 1024;
 
 const HEADER_LEN: usize = 4;
@@ -82,6 +83,17 @@ pub fn uri_list_bytes(paths: &[PathBuf]) -> Vec<u8> {
         out.push_str("file://");
         out.push_str(&percent_encode(&path.to_string_lossy()));
         out.push_str("\r\n");
+    }
+    out.into_bytes()
+}
+
+#[must_use]
+pub fn gnome_copied_files_bytes(paths: &[PathBuf]) -> Vec<u8> {
+    let mut out = String::from("copy\n");
+    for path in paths {
+        out.push_str("file://");
+        out.push_str(&percent_encode(&path.to_string_lossy()));
+        out.push('\n');
     }
     out.into_bytes()
 }

@@ -167,7 +167,7 @@ impl ClipboardBackend for WaylandClipboard {
             if paths.is_empty() {
                 return Err(ClipboardError::Write("no files could be saved".into()));
             }
-            write_uri_list(&files::uri_list_bytes(&paths))?;
+            write_files_offer(&paths)?;
             self.last_hash = Some(content_hash(&saved));
             return Ok(());
         }
@@ -200,19 +200,25 @@ fn is_supported(mime: &str) -> bool {
     matches!(mime, PLAIN_TEXT_MIME | PNG_MIME)
 }
 
-/// Offers only the exact `text/uri-list` type, so `wl-clipboard` does not mirror it into
-/// `text/plain` (which would make pasted text show the file URI).
-fn write_uri_list(bytes: &[u8]) -> Result<(), ClipboardError> {
+/// Offers a file list under the MIME types file managers look for: `text/uri-list` (KDE, most
+/// apps) and `x-special/gnome-copied-files` (GNOME/Nautilus, which gates Paste on it).
+fn write_files_offer(paths: &[std::path::PathBuf]) -> Result<(), ClipboardError> {
     let mut options = Options::new();
     options
         .clipboard(CopyClipboardType::Regular)
         .seat(CopySeat::All)
         .foreground(false)
         .omit_additional_text_mime_types(true);
-    let sources = vec![MimeSource {
-        source: Source::Bytes(bytes.to_vec().into_boxed_slice()),
-        mime_type: copy::MimeType::Specific(files::URI_LIST_MIME.to_string()),
-    }];
+    let sources = vec![
+        MimeSource {
+            source: Source::Bytes(files::uri_list_bytes(paths).into_boxed_slice()),
+            mime_type: copy::MimeType::Specific(files::URI_LIST_MIME.to_string()),
+        },
+        MimeSource {
+            source: Source::Bytes(files::gnome_copied_files_bytes(paths).into_boxed_slice()),
+            mime_type: copy::MimeType::Specific(files::GNOME_COPIED_FILES_MIME.to_string()),
+        },
+    ];
     copy::copy_multi(options, sources).map_err(|err| ClipboardError::Write(err.to_string()))
 }
 
