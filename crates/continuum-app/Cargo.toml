@@ -14,7 +14,7 @@ path = "src/main.rs"
 
 [features]
 default = ["tray"]
-tray = ["dep:tray-icon", "dep:tao"]
+tray = ["dep:tray-icon", "dep:tao", "dep:gtk"]
 
 [dependencies]
 continuum-core.workspace = true
@@ -66,7 +66,7 @@ objc2-foundation = { version = "0.3.2", features = [
 objc2-quartz-core = { version = "0.3.2", features = ["CALayer"] }
 
 [target.'cfg(target_os="linux")'.dependencies]
-gtk = "0.18"
+gtk = { version = "0.18", optional = true }
 
 [lints]
 workspace = true
