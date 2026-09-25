@@ -3,6 +3,7 @@ mod config;
 mod gui;
 mod monitor;
 mod net;
+mod notify;
 mod pairing;
 mod service;
 #[cfg(feature = "tray")]
@@ -11,7 +12,7 @@ mod tray;
 use std::sync::{mpsc, Arc};
 
 use continuum_core::{ClipboardItem, DeviceId, Version};
-use continuum_net::Identity;
+use continuum_net::{Identity, Message};
 use monitor::Monitor;
 pub(crate) struct Core {
     pub(crate) monitor: Monitor,
@@ -49,7 +50,26 @@ impl Core {
                 "local clipboard changed"
             );
             if !self.paused {
-                net::broadcast(&self.registry, &item);
+                if let Some((name, size)) = file_transfer(&item) {
+                    net::broadcast_message(
+                        &self.registry,
+                        &Message::TransferStart {
+                            from: item.origin,
+                            name: name.clone(),
+                            size,
+                        },
+                    );
+                    net::broadcast(&self.registry, &item);
+                    net::broadcast_message(
+                        &self.registry,
+                        &Message::TransferDone {
+                            from: item.origin,
+                            name,
+                        },
+                    );
+                } else {
+                    net::broadcast(&self.registry, &item);
+                }
                 // Clipboard activity also nudges any parked reconnect loops, so links
                 // come up immediately when a peer has just returned.
                 self.waker.wake();
@@ -86,6 +106,10 @@ impl Core {
     pub(crate) fn handle_event(&mut self, event: net::NetEvent) {
         match event {
             net::NetEvent::Clipboard(item) => self.apply_remote(item),
+            net::NetEvent::TransferStart { from, name, size } => {
+                notify::receiving(&name, size, from)
+            }
+            net::NetEvent::TransferDone { from, name } => notify::received(&name, from),
             net::NetEvent::PeerUp(device) => self.announce_to(device),
             net::NetEvent::PeerDown(device) => {
                 tracing::info!(device = %device.short(), "peer offline");
@@ -360,6 +384,33 @@ pub(crate) fn report_access_behavior() {
             "pasteboard access may prompt; if sync stalls, allow Continuum in System Settings"
         ),
     }
+}
+
+fn file_transfer(item: &ClipboardItem) -> Option<(String, u64)> {
+    use continuum_platform::files;
+    if item.items.is_empty() {
+        return None;
+    }
+    let mut names = Vec::new();
+    let mut total = 0u64;
+    for clip in &item.items {
+        if clip.representations.len() != 1 {
+            return None;
+        }
+        let representation = &clip.representations[0];
+        if !files::is_file(representation) {
+            return None;
+        }
+        let (name, size) = files::summary(representation)?;
+        names.push(name);
+        total += size;
+    }
+    let name = if names.len() == 1 {
+        names.remove(0)
+    } else {
+        format!("{} files", names.len())
+    };
+    Some((name, total))
 }
 
 pub(crate) fn preview(text: &str) -> String {

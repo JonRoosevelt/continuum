@@ -119,6 +119,23 @@ impl ClipboardBackend for WaylandClipboard {
                     return Ok(Some(items));
                 }
             }
+        } else if offered
+            .iter()
+            .any(|mime| mime == files::GNOME_COPIED_FILES_MIME)
+        {
+            if let Some(bytes) =
+                self.fetch(PasteMimeType::Specific(files::GNOME_COPIED_FILES_MIME))?
+            {
+                let mut items = Vec::new();
+                for path in files::parse_gnome_copied_files(&bytes) {
+                    if let Some((name, content)) = files::read_file(&path) {
+                        items.push(ClipItem::new(vec![files::encode(&name, &content)])?);
+                    }
+                }
+                if !items.is_empty() {
+                    return Ok(Some(items));
+                }
+            }
         }
 
         // Plain text is normalized to PLAIN_TEXT_MIME regardless of the concrete text MIME

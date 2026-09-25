@@ -18,6 +18,15 @@ const MAX_PAYLOAD: usize = 128 * 1024 * 1024;
 
 pub(crate) enum NetEvent {
     Clipboard(ClipboardItem),
+    TransferStart {
+        from: DeviceId,
+        name: String,
+        size: u64,
+    },
+    TransferDone {
+        from: DeviceId,
+        name: String,
+    },
     PeerUp(DeviceId),
     PeerDown(DeviceId),
 }
@@ -61,6 +70,16 @@ pub(crate) fn broadcast(registry: &Registry, item: &ClipboardItem) {
         );
         return;
     }
+    let peers = registry.lock().expect("registry mutex");
+    for slot in peers.values() {
+        let _ = slot.sender.send(bytes.clone());
+    }
+}
+
+pub(crate) fn broadcast_message(registry: &Registry, message: &Message) {
+    let Ok(bytes) = message.encode() else {
+        return;
+    };
     let peers = registry.lock().expect("registry mutex");
     for slot in peers.values() {
         let _ = slot.sender.send(bytes.clone());
@@ -203,10 +222,15 @@ fn register(
     tracing::info!(device = %remote.short(), outbound, "peer registered");
     on_event(NetEvent::PeerUp(remote));
 
-    let result = peer.run(receiver, |message| {
-        if let Message::Clipboard(item) = message {
-            on_event(NetEvent::Clipboard(*item));
+    let result = peer.run(receiver, |message| match message {
+        Message::Clipboard(item) => on_event(NetEvent::Clipboard(*item)),
+        Message::TransferStart { from, name, size } => {
+            on_event(NetEvent::TransferStart { from, name, size });
         }
+        Message::TransferDone { from, name } => {
+            on_event(NetEvent::TransferDone { from, name });
+        }
+        Message::Ping | Message::Pong => {}
     });
 
     let removed = {

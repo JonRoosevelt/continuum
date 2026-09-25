@@ -1,4 +1,4 @@
-use continuum_core::ClipboardItem;
+use continuum_core::{ClipboardItem, DeviceId};
 use serde::{Deserialize, Serialize};
 
 use crate::error::NetError;
@@ -6,6 +6,15 @@ use crate::error::NetError;
 #[derive(Clone, Serialize, Deserialize)]
 pub enum Message {
     Clipboard(Box<ClipboardItem>),
+    TransferStart {
+        from: DeviceId,
+        name: String,
+        size: u64,
+    },
+    TransferDone {
+        from: DeviceId,
+        name: String,
+    },
     Ping,
     Pong,
 }

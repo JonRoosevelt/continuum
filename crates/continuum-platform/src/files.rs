@@ -15,6 +15,22 @@ pub fn is_file(representation: &Representation) -> bool {
     representation.mime == FILE_MIME
 }
 
+/// Returns `(name, content length)` for a file representation, without copying its content.
+#[must_use]
+pub fn summary(representation: &Representation) -> Option<(String, u64)> {
+    if representation.mime != FILE_MIME || representation.bytes.len() < HEADER_LEN {
+        return None;
+    }
+    let len = u32::from_le_bytes(representation.bytes[..HEADER_LEN].try_into().ok()?) as usize;
+    if representation.bytes.len() < HEADER_LEN + len {
+        return None;
+    }
+    let name =
+        String::from_utf8(representation.bytes[HEADER_LEN..HEADER_LEN + len].to_vec()).ok()?;
+    let content_len = representation.bytes.len() - HEADER_LEN - len;
+    Some((name, content_len as u64))
+}
+
 #[must_use]
 pub fn encode(name: &str, content: &[u8]) -> Representation {
     let name_bytes = name.as_bytes();
@@ -101,6 +117,19 @@ pub fn gnome_copied_files_bytes(paths: &[PathBuf]) -> Vec<u8> {
 pub fn parse_uri_list(bytes: &[u8]) -> Vec<PathBuf> {
     String::from_utf8_lossy(bytes)
         .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| line.strip_prefix("file://"))
+        .map(|encoded| PathBuf::from(percent_decode(encoded)))
+        .collect()
+}
+
+/// Parses `x-special/gnome-copied-files`, whose first line is the action (copy/cut).
+#[must_use]
+pub fn parse_gnome_copied_files(bytes: &[u8]) -> Vec<PathBuf> {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .skip(1)
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .filter_map(|line| line.strip_prefix("file://"))
