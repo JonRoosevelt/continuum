@@ -78,22 +78,21 @@ pub fn file_url(path: &Path) -> String {
 
 #[must_use]
 pub fn uri_list_bytes(paths: &[PathBuf]) -> Vec<u8> {
-    let mut out = String::new();
-    for path in paths {
-        out.push_str("file://");
-        out.push_str(&percent_encode(&path.to_string_lossy()));
-        out.push_str("\r\n");
-    }
-    out.into_bytes()
+    paths
+        .iter()
+        .map(|path| format!("file://{}", percent_encode(&path.to_string_lossy())))
+        .collect::<Vec<_>>()
+        .join("\r\n")
+        .into_bytes()
 }
 
 #[must_use]
 pub fn gnome_copied_files_bytes(paths: &[PathBuf]) -> Vec<u8> {
-    let mut out = String::from("copy\n");
+    let mut out = String::from("copy");
     for path in paths {
+        out.push('\n');
         out.push_str("file://");
         out.push_str(&percent_encode(&path.to_string_lossy()));
-        out.push('\n');
     }
     out.into_bytes()
 }
