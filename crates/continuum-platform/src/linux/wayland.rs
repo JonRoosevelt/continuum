@@ -13,6 +13,7 @@ use wl_clipboard_rs::paste::{
 };
 
 use crate::backend::{ClipboardBackend, ClipboardError};
+use crate::files;
 use crate::mime;
 
 pub struct WaylandClipboard {
@@ -106,6 +107,20 @@ impl ClipboardBackend for WaylandClipboard {
             return Ok(None);
         }
 
+        if offered.iter().any(|mime| mime == files::URI_LIST_MIME) {
+            if let Some(bytes) = self.fetch(PasteMimeType::Specific(files::URI_LIST_MIME))? {
+                let mut items = Vec::new();
+                for path in files::parse_uri_list(&bytes) {
+                    if let Some((name, content)) = files::read_file(&path) {
+                        items.push(ClipItem::new(vec![files::encode(&name, &content)])?);
+                    }
+                }
+                if !items.is_empty() {
+                    return Ok(Some(items));
+                }
+            }
+        }
+
         // Plain text is normalized to PLAIN_TEXT_MIME regardless of the concrete text MIME
         // wl-clipboard-rs selected, so read hashing matches what write() offers.
         let mut representations = Vec::new();
@@ -127,6 +142,34 @@ impl ClipboardBackend for WaylandClipboard {
             return Err(ClipboardError::Write(
                 "clipboard payload has no items".into(),
             ));
+        }
+
+        let files_only = items.iter().all(|item| {
+            item.representations.len() == 1 && files::is_file(&item.representations[0])
+        });
+        if files_only {
+            let mut paths = Vec::new();
+            let mut saved = Vec::new();
+            for item in items {
+                let Some((name, content)) = files::decode(&item.representations[0]) else {
+                    continue;
+                };
+                let path = files::save(&name, &content)
+                    .map_err(|err| ClipboardError::Write(err.to_string()))?;
+                let saved_name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("file")
+                    .to_string();
+                saved.push(ClipItem::new(vec![files::encode(&saved_name, &content)])?);
+                paths.push(path);
+            }
+            if paths.is_empty() {
+                return Err(ClipboardError::Write("no files could be saved".into()));
+            }
+            write_uri_list(&files::uri_list_bytes(&paths))?;
+            self.last_hash = Some(content_hash(&saved));
+            return Ok(());
         }
 
         let total: usize = items
@@ -155,6 +198,22 @@ const INLINE_MAX: usize = 48 * 1024;
 
 fn is_supported(mime: &str) -> bool {
     matches!(mime, PLAIN_TEXT_MIME | PNG_MIME)
+}
+
+/// Offers only the exact `text/uri-list` type, so `wl-clipboard` does not mirror it into
+/// `text/plain` (which would make pasted text show the file URI).
+fn write_uri_list(bytes: &[u8]) -> Result<(), ClipboardError> {
+    let mut options = Options::new();
+    options
+        .clipboard(CopyClipboardType::Regular)
+        .seat(CopySeat::All)
+        .foreground(false)
+        .omit_additional_text_mime_types(true);
+    let sources = vec![MimeSource {
+        source: Source::Bytes(bytes.to_vec().into_boxed_slice()),
+        mime_type: copy::MimeType::Specific(files::URI_LIST_MIME.to_string()),
+    }];
+    copy::copy_multi(options, sources).map_err(|err| ClipboardError::Write(err.to_string()))
 }
 
 fn write_inline(items: &[ClipItem]) -> Result<(), ClipboardError> {

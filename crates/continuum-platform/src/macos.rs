@@ -8,6 +8,7 @@ use objc2_foundation::{NSArray, NSData, NSString};
 use continuum_core::{ClipItem, Representation, PNG_MIME, TIFF_MIME};
 
 use crate::backend::{AccessBehavior, ClipboardBackend, ClipboardError};
+use crate::files;
 use crate::mime;
 
 pub struct MacClipboard {
@@ -62,6 +63,17 @@ impl ClipboardBackend for MacClipboard {
 
     fn write(&mut self, items: &[ClipItem]) -> Result<(), ClipboardError> {
         let pasteboard = NSPasteboard::generalPasteboard();
+
+        let files_only = !items.is_empty()
+            && items.iter().all(|item| {
+                item.representations.len() == 1 && files::is_file(&item.representations[0])
+            });
+        if files_only {
+            write_files(&pasteboard, items)?;
+            self.last_change_count = pasteboard.changeCount();
+            return Ok(());
+        }
+
         pasteboard.clearContents();
 
         let mut objects: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = Vec::new();
@@ -113,6 +125,19 @@ fn read_pasteboard(pasteboard: &NSPasteboard) -> Result<Option<Vec<ClipItem>>, C
         if mime::is_sensitive(&type_names) {
             continue;
         }
+        if type_names.iter().any(|ty| ty == "public.file-url") {
+            let url_type = NSString::from_str("public.file-url");
+            if let Some(data) = item.dataForType(&url_type) {
+                let url = String::from_utf8_lossy(&data.to_vec()).into_owned();
+                if let Some(path) = files::parse_uri_list(url.as_bytes()).into_iter().next() {
+                    if let Some((name, content)) = files::read_file(&path) {
+                        result.push(ClipItem::new(vec![files::encode(&name, &content)])?);
+                        continue;
+                    }
+                }
+            }
+            continue;
+        }
         let mut representations = Vec::new();
         for ty in types.iter() {
             let Some(target) = mime::native::from_native(&ty.to_string()) else {
@@ -153,6 +178,35 @@ fn tiff_to_png(tiff: &[u8]) -> Option<Vec<u8>> {
         .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
         .ok()?;
     Some(png)
+}
+
+fn write_files(pasteboard: &NSPasteboard, items: &[ClipItem]) -> Result<(), ClipboardError> {
+    let mut objects: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = Vec::new();
+    for item in items {
+        let Some((name, content)) = files::decode(&item.representations[0]) else {
+            continue;
+        };
+        let path =
+            files::save(&name, &content).map_err(|err| ClipboardError::Write(err.to_string()))?;
+        let url = files::file_url(&path);
+        let url_type = NSString::from_str("public.file-url");
+        let uri_type = NSString::from_str("text/uri-list");
+        let ns_item = NSPasteboardItem::new();
+        let _ = ns_item.setString_forType(&NSString::from_str(&url), &url_type);
+        let _ = ns_item.setString_forType(&NSString::from_str(&url), &uri_type);
+        objects.push(ProtocolObject::from_retained(ns_item));
+    }
+    if objects.is_empty() {
+        return Err(ClipboardError::Write("no files could be saved".into()));
+    }
+    pasteboard.clearContents();
+    let array = NSArray::from_retained_slice(&objects);
+    if !pasteboard.writeObjects(&array) {
+        return Err(ClipboardError::Write(
+            "NSPasteboard::writeObjects failed".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

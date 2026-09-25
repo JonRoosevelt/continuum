@@ -3,10 +3,12 @@
 Tray-only clipboard sync between macOS and Linux over the local network. No cloud,
 no account, no telemetry — copy on one machine and paste on another.
 
-Status: plain text and images sync between macOS and Linux (Wayland) end-to-end
-over LAN/Tailscale; packaging and more are tracked in [TASKS.md](TASKS.md).
-HTML/RTF are intentionally **not** synced — web apps put styled HTML on the
-clipboard, and re-offering it corrupts pasted text on Linux.
+Status: plain text, images, and files sync between macOS and Linux (Wayland)
+end-to-end over LAN/Tailscale; packaging and more are tracked in
+[TASKS.md](TASKS.md). Received files are written to `~/Downloads/Continuum`
+(never overwritten, ≤100 MB each). HTML/RTF are intentionally **not** synced —
+web apps put styled HTML on the clipboard, and re-offering it corrupts pasted
+text on Linux.
 
 ## How it works
 
@@ -93,7 +95,9 @@ device pins the other's public key into its config and connects on next start.
 - Images are normalized to PNG (a macOS-only TIFF is converted) so they interoperate with Linux.
 - Sensitive content is skipped by default (`org.nspasteboard` transient/concealed/
   auto-generated, `com.apple.is-remote-clipboard`, `x-kde-passwordManagerHint`).
-- Clipboard content is never written to disk (no history in v1).
+- Clipboard content is never written to disk (no history in v1); copied **files**
+  are the exception — they arrive in `~/Downloads/Continuum` and are never
+  overwritten (a numeric suffix is added on collision).
 
 Known gaps: the identity key is stored as a `0600` file, not yet in the OS
 keychain / libsecret. On Wayland, payloads above 48 KiB are written via `wl-copy`

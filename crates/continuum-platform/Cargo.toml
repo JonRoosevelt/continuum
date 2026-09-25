@@ -10,6 +10,7 @@ description = "Platform clipboard capture and injection for Continuum"
 
 [dependencies]
 continuum-core.workspace = true
+dirs = "7.0.0"
 thiserror = "2.0.21"
 
 [lints]
@@ -19,7 +20,7 @@ workspace = true
 image = { version = "0.25.6", default-features = false, features = ["png", "tiff"] }
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", features = ["NSPasteboard", "NSPasteboardItem"] }
-objc2-foundation = { version = "0.3.2", features = ["NSData", "NSArray", "NSString"] }
+objc2-foundation = { version = "0.3.2", features = ["NSData", "NSArray", "NSString", "NSURL"] }
 
 [target.'cfg(target_os="linux")'.dependencies]
 wl-clipboard-rs = "0.9.3"

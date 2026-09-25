@@ -324,6 +324,7 @@ name = "continuum-platform"
 version = "0.1.0"
 dependencies = [
  "continuum-core",
+ "dirs 7.0.0",
  "image",
  "objc2",
  "objc2-app-kit",

@@ -14,7 +14,7 @@ static CONNECTION_SEQ: AtomicU64 = AtomicU64::new(0);
 const RECONNECT_MIN: Duration = Duration::from_millis(500);
 const RECONNECT_MAX: Duration = Duration::from_secs(3);
 // Keep below the transport frame limit so an oversized payload is skipped, not fatal.
-const MAX_PAYLOAD: usize = 60 * 1024 * 1024;
+const MAX_PAYLOAD: usize = 128 * 1024 * 1024;
 
 pub(crate) enum NetEvent {
     Clipboard(ClipboardItem),

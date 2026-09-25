@@ -4,6 +4,7 @@
 //! runtime on Linux (Wayland data-control first, X11/XWayland fallback).
 
 pub mod backend;
+pub mod files;
 pub mod mime;
 
 #[cfg(target_os = "linux")]
