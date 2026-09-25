@@ -6,21 +6,23 @@ use std::time::{Duration, Instant};
 use objc2::rc::Retained;
 use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSBackingStoreType, NSColor, NSFloatingWindowLevel, NSFont, NSPanel, NSProgressIndicator,
-    NSProgressIndicatorStyle, NSScreen, NSTextField, NSView, NSVisualEffectBlendingMode,
-    NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindowStyleMask,
+    NSBackingStoreType, NSColor, NSFont, NSPanel, NSProgressIndicator, NSProgressIndicatorStyle,
+    NSScreen, NSStatusWindowLevel, NSTextField, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
+    NSVisualEffectState, NSVisualEffectView, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 
-const WIDTH: f64 = 260.0;
-const HEIGHT: f64 = 54.0;
-const TOP_MARGIN: f64 = 40.0;
+const WIDTH: f64 = 280.0;
+const HEIGHT: f64 = 56.0;
+const TOP_MARGIN: f64 = 44.0;
 const AUTO_HIDE: Duration = Duration::from_secs(30);
+const MIN_VISIBLE: Duration = Duration::from_millis(1800);
 
 struct Hud {
     panel: Retained<NSPanel>,
     label: Retained<NSTextField>,
     progress: Retained<NSProgressIndicator>,
+    shown_at: Option<Instant>,
     deadline: Option<Instant>,
 }
 
@@ -49,10 +51,17 @@ pub fn show(name: &str, size: u64) {
 
         let text = format!("Receiving {name} ({})…", human(size));
         hud.label.setStringValue(&NSString::from_str(&text));
+        hud.shown_at = Some(Instant::now());
         hud.deadline = Some(Instant::now() + AUTO_HIDE);
         // SAFETY: the sender argument is unused by NSProgressIndicator.
         unsafe { hud.progress.startAnimation(None) };
         hud.panel.orderFrontRegardless();
+        tracing::info!(
+            name,
+            size,
+            visible = hud.panel.isVisible(),
+            "showing transfer hud"
+        );
     });
 }
 
@@ -63,9 +72,18 @@ pub fn hide() {
             return;
         };
         hud.deadline = None;
+        // Keep it on screen briefly even for instant transfers, so it is noticed.
+        if let Some(shown_at) = hud.shown_at {
+            if shown_at.elapsed() < MIN_VISIBLE {
+                hud.deadline = Some(shown_at + MIN_VISIBLE);
+                return;
+            }
+        }
+        hud.shown_at = None;
         // SAFETY: the sender argument is unused by NSProgressIndicator.
         unsafe { hud.progress.stopAnimation(None) };
         hud.panel.orderOut(None);
+        tracing::info!("hiding transfer hud");
     });
 }
 
@@ -104,38 +122,47 @@ impl Hud {
             NSBackingStoreType::Buffered,
             false,
         );
-        // The module keeps the panel handles for the process lifetime, so AppKit
-        // must not free the panel when it is ordered out.
-        // SAFETY: NSWindow's `setReleasedWhenClosed:` has no other requirements.
+        // The handles live for the process lifetime, so AppKit must not free the
+        // panel when it is ordered out.
+        // SAFETY: `setReleasedWhenClosed:` has no other requirements.
         unsafe { panel.setReleasedWhenClosed(false) };
-        panel.setLevel(NSFloatingWindowLevel);
+        panel.setLevel(NSStatusWindowLevel);
         panel.setOpaque(false);
-        panel.setBackgroundColor(Some(&NSColor::clearColor()));
+        panel.setBackgroundColor(Some(&NSColor::colorWithWhite_alpha(0.12, 0.9)));
         panel.setHasShadow(true);
         panel.setIgnoresMouseEvents(true);
+        panel.setHidesOnDeactivate(false);
+        panel.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::FullScreenAuxiliary
+                | NSWindowCollectionBehavior::Stationary,
+        );
 
-        let background = NSVisualEffectView::initWithFrame(
+        let content = NSVisualEffectView::initWithFrame(
             NSVisualEffectView::alloc(mtm),
             NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(WIDTH, HEIGHT)),
         );
-        background.setMaterial(NSVisualEffectMaterial::HUDWindow);
-        background.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
-        background.setState(NSVisualEffectState::Active);
-
-        let content: &NSView = &background;
-        panel.setContentView(Some(content));
+        content.setMaterial(NSVisualEffectMaterial::HUDWindow);
+        content.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+        content.setState(NSVisualEffectState::Active);
+        content.setWantsLayer(true);
+        if let Some(layer) = content.layer() {
+            layer.setCornerRadius(12.0);
+            layer.setMasksToBounds(true);
+        }
+        panel.setContentView(Some(&content));
 
         let label = NSTextField::labelWithString(&NSString::from_str(""), mtm);
         label.setFrame(NSRect::new(
-            NSPoint::new(14.0, 30.0),
-            NSSize::new(WIDTH - 28.0, 17.0),
+            NSPoint::new(16.0, 31.0),
+            NSSize::new(WIDTH - 32.0, 17.0),
         ));
-        label.setTextColor(Some(&NSColor::labelColor()));
+        label.setTextColor(Some(&NSColor::whiteColor()));
         label.setFont(Some(&NSFont::systemFontOfSize(13.0)));
 
         let progress = NSProgressIndicator::initWithFrame(
             NSProgressIndicator::alloc(mtm),
-            NSRect::new(NSPoint::new(14.0, 11.0), NSSize::new(WIDTH - 28.0, 12.0)),
+            NSRect::new(NSPoint::new(16.0, 11.0), NSSize::new(WIDTH - 32.0, 12.0)),
         );
         progress.setStyle(NSProgressIndicatorStyle::Bar);
         progress.setIndeterminate(true);
@@ -151,6 +178,7 @@ impl Hud {
             panel,
             label,
             progress,
+            shown_at: None,
             deadline: None,
         })
     }

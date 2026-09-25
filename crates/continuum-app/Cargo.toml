@@ -55,5 +55,8 @@ objc2-foundation = { version = "0.3.2", features = [
     "objc2-core-foundation",
 ] }
 
+[target.'cfg(target_os="macos")'.dependencies]
+objc2-quartz-core = { version = "0.3.2", features = ["CALayer"] }
+
 [lints]
 workspace = true
