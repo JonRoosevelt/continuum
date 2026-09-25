@@ -79,6 +79,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 - [x] Runtime-verified the Linux X11 backend via XWayland: file read/write (text/uri-list + x-special/gnome-copied-files) using xclip
 
 ## Later (post-v1)
+- [x] Lazy/promise file transfer — decided against: it is macOS-receiver-only (paste-time data provider) and Linux cannot defer, since the file manager copies a real file at paste. Eager transfer retained.
+
 
 - [ ] Clipboard history (encrypted at rest, auto-expire, keyring-sealed)
 - [ ] GNOME Shell extension for native Mutter support
