@@ -6,7 +6,8 @@ use crate::backend::{ClipboardBackend, ClipboardError};
 pub fn open() -> Result<Box<dyn ClipboardBackend>, ClipboardError> {
     let mut errors: Vec<String> = Vec::new();
 
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+    let force_x11 = std::env::var_os("CONTINUUM_FORCE_X11").is_some();
+    if !force_x11 && std::env::var_os("WAYLAND_DISPLAY").is_some() {
         match wayland::WaylandClipboard::new() {
             Ok(backend) => return Ok(Box::new(backend)),
             Err(err) => errors.push(format!("wayland: {err}")),

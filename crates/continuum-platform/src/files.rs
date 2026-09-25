@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use continuum_core::Representation;
 
@@ -56,7 +57,37 @@ pub fn decode(representation: &Representation) -> Option<(String, Vec<u8>)> {
     Some((name, content))
 }
 
-/// Writes `content` under `~/Downloads/Continuum`, never overwriting, and returns the path.
+static DESTINATION_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Overrides the received-file folder for this process. `None` keeps the default
+/// (`~/Downloads/Continuum`); the first non-`None` value wins.
+pub fn set_destination_dir(dir: Option<PathBuf>) {
+    if let Some(dir) = dir {
+        let _ = DESTINATION_DIR.set(dir);
+    }
+}
+
+/// Expands a configured folder: a leading `~` becomes the home directory, and
+/// relative paths resolve against the home directory.
+#[must_use]
+pub fn resolve_dir(raw: &str) -> PathBuf {
+    let home = dirs::home_dir();
+    let expanded = if raw == "~" {
+        home.clone().unwrap_or_else(|| PathBuf::from(raw))
+    } else if let Some(rest) = raw.strip_prefix("~/") {
+        home.clone()
+            .map_or_else(|| PathBuf::from(raw), |home| home.join(rest))
+    } else {
+        PathBuf::from(raw)
+    };
+    if expanded.is_absolute() {
+        expanded
+    } else {
+        home.map_or(expanded.clone(), |home| home.join(expanded))
+    }
+}
+
+/// Writes `content` under the destination folder, never overwriting, and returns the path.
 pub fn save(name: &str, content: &[u8]) -> std::io::Result<PathBuf> {
     let dir = destination_dir();
     fs::create_dir_all(&dir)?;
@@ -67,6 +98,10 @@ pub fn save(name: &str, content: &[u8]) -> std::io::Result<PathBuf> {
 
 #[must_use]
 pub fn destination_dir() -> PathBuf {
+    DESTINATION_DIR.get().cloned().unwrap_or_else(default_dir)
+}
+
+fn default_dir() -> PathBuf {
     dirs::download_dir()
         .or_else(|| dirs::home_dir().map(|home| home.join("Downloads")))
         .unwrap_or_else(|| PathBuf::from("/tmp"))

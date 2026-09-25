@@ -175,9 +175,18 @@ pub(crate) fn load() -> anyhow::Result<Loaded> {
     let config_path = config::default_config_path()
         .ok_or_else(|| anyhow::anyhow!("could not resolve the config directory"))?;
     let config = config::Config::load_or_create(&config_path)?;
+    apply_download_dir(&config);
     tracing::info!(listen = %config.listen, peers = config.peers.len(), "config loaded");
 
     Ok(Loaded { identity, config })
+}
+
+fn apply_download_dir(config: &config::Config) {
+    let dir = config
+        .download_dir
+        .as_deref()
+        .map(continuum_platform::files::resolve_dir);
+    continuum_platform::files::set_destination_dir(dir);
 }
 
 fn main() {
@@ -233,11 +242,16 @@ fn show_status() -> anyhow::Result<()> {
     let config_path = config::default_config_path()
         .ok_or_else(|| anyhow::anyhow!("could not resolve the config directory"))?;
     let config = config::Config::load_or_create(&config_path)?;
+    apply_download_dir(&config);
     let identity = load_identity()?;
 
     println!("device   : {}", identity.device_id().short());
     println!("listen   : {}", config.listen);
     println!("config   : {}", config_path.display());
+    println!(
+        "staging  : {}",
+        continuum_platform::files::destination_dir().display()
+    );
     println!("peers    : {}", config.peers.len());
     for peer in &config.peers {
         let short: String = peer.public_key.chars().take(16).collect();

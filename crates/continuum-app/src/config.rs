@@ -17,6 +17,8 @@ pub struct Config {
     pub listen: String,
     #[serde(default)]
     pub peers: Vec<PeerConfig>,
+    #[serde(default)]
+    pub download_dir: Option<String>,
 }
 
 impl Default for Config {
@@ -25,6 +27,7 @@ impl Default for Config {
             name: default_name(),
             listen: "0.0.0.0:8770".to_string(),
             peers: Vec::new(),
+            download_dir: None,
         }
     }
 }

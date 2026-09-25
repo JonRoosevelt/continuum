@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use x11rb::connection::Connection as _;
 use x11rb::protocol::xproto::{
     Atom, AtomEnum, ConnectionExt as _, CreateWindowAux, EventMask, GetPropertyReply, ImageOrder,
@@ -13,6 +15,7 @@ use continuum_core::{
 };
 
 use crate::backend::{ClipboardBackend, ClipboardError};
+use crate::files;
 
 const PRIVATE_PROPERTY: &str = "CONTINUUM_SELECTION";
 
@@ -24,6 +27,8 @@ struct Atoms {
     string: Atom,
     plain: Atom,
     png: Atom,
+    uri_list: Atom,
+    gnome_copied_files: Atom,
     incr: Atom,
     timestamp: Atom,
     #[allow(dead_code)]
@@ -37,6 +42,7 @@ pub struct X11Clipboard {
     window: Window,
     atoms: Atoms,
     owned: Option<Vec<ClipItem>>,
+    owned_files: Option<Vec<PathBuf>>,
     last_hash: Option<ContentHash>,
 }
 
@@ -78,6 +84,8 @@ impl X11Clipboard {
             string: intern(&conn, "STRING", false)?,
             plain: intern(&conn, PLAIN_TEXT_MIME, false)?,
             png: intern(&conn, PNG_MIME, false)?,
+            uri_list: intern(&conn, files::URI_LIST_MIME, false)?,
+            gnome_copied_files: intern(&conn, files::GNOME_COPIED_FILES_MIME, false)?,
             incr: intern(&conn, "INCR", false)?,
             timestamp: intern(&conn, "TIMESTAMP", false)?,
             multiple: intern(&conn, "MULTIPLE", false)?,
@@ -92,6 +100,7 @@ impl X11Clipboard {
             window,
             atoms,
             owned: None,
+            owned_files: None,
             last_hash: None,
         })
     }
@@ -101,6 +110,7 @@ impl X11Clipboard {
             Event::SelectionRequest(request) => self.serve_request(request)?,
             Event::SelectionClear(clear) if clear.selection == self.atoms.clipboard => {
                 self.owned = None;
+                self.owned_files = None;
             }
             _ => {}
         }
@@ -109,6 +119,15 @@ impl X11Clipboard {
 
     fn offered_atoms(&self) -> Vec<Atom> {
         let mut targets = vec![self.atoms.targets, self.atoms.timestamp];
+        if self
+            .owned_files
+            .as_ref()
+            .is_some_and(|files| !files.is_empty())
+        {
+            targets.push(self.atoms.uri_list);
+            targets.push(self.atoms.gnome_copied_files);
+            return targets;
+        }
         let Some(owned) = self.owned.as_ref() else {
             return targets;
         };
@@ -133,6 +152,16 @@ impl X11Clipboard {
     }
 
     fn served_bytes(&self, target: Atom) -> Option<Vec<u8>> {
+        if let Some(files) = self.owned_files.as_ref() {
+            if !files.is_empty() {
+                if target == self.atoms.uri_list {
+                    return Some(files::uri_list_bytes(files));
+                }
+                if target == self.atoms.gnome_copied_files {
+                    return Some(files::gnome_copied_files_bytes(files));
+                }
+            }
+        }
         let owned = self.owned.as_ref()?;
         for item in owned {
             for representation in &item.representations {
@@ -268,20 +297,66 @@ impl X11Clipboard {
         Ok((!reply.value.is_empty()).then_some(reply.value))
     }
 
-    fn offers_sensitive_type(&mut self) -> Result<bool, ClipboardError> {
-        if self.atoms.sensitive == x11rb::NONE {
-            return Ok(false);
-        }
+    fn owner_targets(&mut self) -> Result<Vec<Atom>, ClipboardError> {
         let selection = self.atoms.clipboard;
         let Some(reply) = self.exchange(selection, self.atoms.targets)? else {
-            return Ok(false);
+            return Ok(Vec::new());
         };
         if reply.type_ != u32::from(AtomEnum::ATOM) {
-            return Ok(false);
+            return Ok(Vec::new());
         }
-        Ok(self
-            .atoms_from_property(&reply.value)
-            .contains(&self.atoms.sensitive))
+        Ok(self.atoms_from_property(&reply.value))
+    }
+
+    fn fetch_file_items(
+        &mut self,
+        target: Atom,
+        parse: fn(&[u8]) -> Vec<PathBuf>,
+    ) -> Result<Option<Vec<ClipItem>>, ClipboardError> {
+        let Some(bytes) = self.fetch_bytes(self.atoms.clipboard, target)? else {
+            return Ok(None);
+        };
+        let mut items = Vec::new();
+        for path in parse(&bytes) {
+            if let Some((name, content)) = files::read_file(&path) {
+                items.push(ClipItem::new(vec![files::encode(&name, &content)])?);
+            }
+        }
+        Ok((!items.is_empty()).then_some(items))
+    }
+
+    fn write_files(&mut self, items: &[ClipItem]) -> Result<(), ClipboardError> {
+        let mut paths = Vec::new();
+        let mut saved = Vec::new();
+        for item in items {
+            let Some((name, content)) = files::decode(&item.representations[0]) else {
+                continue;
+            };
+            let path = files::save(&name, &content)
+                .map_err(|err| ClipboardError::Write(err.to_string()))?;
+            let saved_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("file")
+                .to_string();
+            saved.push(ClipItem::new(vec![files::encode(&saved_name, &content)])?);
+            paths.push(path);
+        }
+        if paths.is_empty() {
+            return Err(ClipboardError::Write("no files could be saved".into()));
+        }
+
+        self.owned = None;
+        self.owned_files = Some(paths);
+        self.conn
+            .set_selection_owner(self.window, self.atoms.clipboard, Time::CURRENT_TIME)
+            .map_err(conn_err)?;
+        self.conn.flush().map_err(conn_err)?;
+
+        // Read-back yields each saved file's basename and bytes, so seeding this exact shape
+        // stops a clipboard manager re-offering our own file list from echoing back.
+        self.last_hash = Some(content_hash(&saved));
+        Ok(())
     }
 
     fn atoms_from_property(&self, bytes: &[u8]) -> Vec<Atom> {
@@ -331,8 +406,24 @@ impl ClipboardBackend for X11Clipboard {
             return Ok(None);
         }
 
-        if self.offers_sensitive_type()? {
+        let targets = self.owner_targets()?;
+        if self.atoms.sensitive != x11rb::NONE && targets.contains(&self.atoms.sensitive) {
             return Ok(None);
+        }
+
+        if targets.contains(&self.atoms.uri_list) {
+            if let Some(items) =
+                self.fetch_file_items(self.atoms.uri_list, files::parse_uri_list)?
+            {
+                return Ok(Some(items));
+            }
+        } else if targets.contains(&self.atoms.gnome_copied_files) {
+            if let Some(items) = self.fetch_file_items(
+                self.atoms.gnome_copied_files,
+                files::parse_gnome_copied_files,
+            )? {
+                return Ok(Some(items));
+            }
         }
 
         let mut representations = Vec::new();
@@ -363,6 +454,14 @@ impl ClipboardBackend for X11Clipboard {
             ));
         }
 
+        let files_only = items.iter().all(|item| {
+            item.representations.len() == 1 && files::is_file(&item.representations[0])
+        });
+        if files_only {
+            return self.write_files(items);
+        }
+
+        self.owned_files = None;
         self.owned = Some(items.to_vec());
         self.conn
             .set_selection_owner(self.window, self.atoms.clipboard, Time::CURRENT_TIME)
