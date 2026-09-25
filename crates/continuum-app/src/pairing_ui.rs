@@ -1,10 +1,12 @@
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 
 use continuum_core::DeviceId;
+use continuum_net::device_id_from_public;
 use gtk::glib;
 use gtk::prelude::*;
 
@@ -37,6 +39,8 @@ struct PairingWindow {
     nearby: Vec<(DeviceId, SocketAddr)>,
     map: AddressMap,
     paired: Vec<DeviceId>,
+    online: HashSet<DeviceId>,
+    last_target: Option<DeviceId>,
     local: Option<DeviceId>,
     pair_button: gtk::Button,
     wait_button: gtk::Button,
@@ -66,19 +70,45 @@ pub fn take_unpaired() -> Vec<DeviceId> {
     UNPAIRED.with(|cell| std::mem::take(&mut *cell.borrow_mut()))
 }
 
-pub fn open(map: AddressMap, paired: Vec<DeviceId>) {
+/// Reflects a live link coming up or going down on the open window.
+pub fn set_online(device: DeviceId, online: bool) {
+    with_window(|window| {
+        let changed = if online {
+            window.online.insert(device)
+        } else {
+            window.online.remove(&device)
+        };
+        if !changed {
+            return;
+        }
+        window.nearby.clear();
+        window.refresh_nearby();
+        if window.last_target == Some(device) {
+            let name = device.short();
+            if online {
+                window.set_status(&format!("Connected to {name}."));
+            } else {
+                window.set_status(&format!("Disconnected from {name}; retrying…"));
+            }
+        }
+    });
+}
+
+pub fn open(map: AddressMap, paired: Vec<DeviceId>, online: Vec<DeviceId>) {
     WINDOW.with(|cell| {
         let mut slot = cell.borrow_mut();
         match slot.as_mut() {
             Some(window) => {
                 window.map = map;
                 window.paired = paired;
+                window.online = online.into_iter().collect();
                 window.refresh_nearby();
                 window.window.show_all();
                 window.window.present();
             }
             None => {
                 let mut window = PairingWindow::new(map, paired);
+                window.online = online.into_iter().collect();
                 window.refresh_nearby();
                 window.window.show_all();
                 window.window.present();
@@ -202,6 +232,8 @@ impl PairingWindow {
             nearby: Vec::new(),
             map,
             paired,
+            online: HashSet::new(),
+            last_target: None,
             local,
             pair_button,
             wait_button,
@@ -243,6 +275,9 @@ impl PairingWindow {
             let mut title = format!("{}  ·  {address}", id.short());
             if paired {
                 title.push_str("  (paired)");
+            }
+            if self.online.contains(&id) {
+                title.push_str("  (connected)");
             }
             let row = gtk::ListBoxRow::new();
             let container = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -287,6 +322,9 @@ impl PairingWindow {
                 self.set_interactive(false, true, true);
             }
             UiEvent::Paired(peer) => {
+                if let Ok(key) = hex::decode(&peer.public_key) {
+                    self.last_target = Some(device_id_from_public(&key));
+                }
                 match pairing::save_peer(&peer) {
                     Ok(()) => {
                         tracing::info!(peer = %peer.name, address = %peer.display_address(), "paired device");

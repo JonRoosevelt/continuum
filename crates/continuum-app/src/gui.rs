@@ -82,6 +82,15 @@ pub fn run() {
             }
             Event::UserEvent(UserEvent::Net(event)) => {
                 if let Some(app) = app.as_mut() {
+                    match &event {
+                        crate::net::NetEvent::PeerUp(device) => {
+                            crate::pairing_window::set_online(*device, true);
+                        }
+                        crate::net::NetEvent::PeerDown(device) => {
+                            crate::pairing_window::set_online(*device, false);
+                        }
+                        _ => {}
+                    }
                     app.core.handle_event(event);
                 }
             }
@@ -110,6 +119,7 @@ fn handle_action(app: &mut App, action: TrayAction, control_flow: &mut ControlFl
             crate::pairing_window::open(
                 app.core.discovered_addresses(),
                 app.core.paired_device_ids(),
+                app.core.online_device_ids(),
                 app.core.discovered_map(),
             );
             #[cfg(not(target_os = "macos"))]

@@ -220,6 +220,12 @@ impl Core {
         self.paused = paused;
     }
 
+    #[allow(dead_code)]
+    #[must_use]
+    pub(crate) fn online_device_ids(&self) -> Vec<DeviceId> {
+        net::online_devices(&self.registry)
+    }
+
     /// Brings a freshly paired peer online without restarting the process.
     #[allow(dead_code)]
     pub(crate) fn add_peer(&mut self, peer: config::PeerConfig) {

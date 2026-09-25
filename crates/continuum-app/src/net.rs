@@ -75,6 +75,17 @@ pub(crate) fn peer_count(registry: &Registry) -> usize {
     registry.lock().expect("registry mutex").len()
 }
 
+#[allow(dead_code)]
+#[must_use]
+pub(crate) fn online_devices(registry: &Registry) -> Vec<DeviceId> {
+    registry
+        .lock()
+        .expect("registry mutex")
+        .keys()
+        .copied()
+        .collect()
+}
+
 pub(crate) fn broadcast(registry: &Registry, item: &ClipboardItem) {
     let Ok(bytes) = Message::Clipboard(Box::new(item.clone())).encode() else {
         tracing::warn!("failed to encode clipboard message");

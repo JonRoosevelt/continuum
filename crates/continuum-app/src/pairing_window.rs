@@ -1,12 +1,14 @@
 #![allow(unsafe_code)]
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 
 use continuum_core::DeviceId;
+use continuum_net::device_id_from_public;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, Sel};
 use objc2::{define_class, msg_send, sel, MainThreadMarker, MainThreadOnly};
@@ -52,6 +54,8 @@ struct PairingWindow {
     nearby: Vec<(DeviceId, SocketAddr)>,
     map: AddressMap,
     paired: Vec<DeviceId>,
+    online: HashSet<DeviceId>,
+    last_target: Option<DeviceId>,
     local: Option<DeviceId>,
     pair_button: Retained<NSButton>,
     wait_button: Retained<NSButton>,
@@ -80,6 +84,33 @@ pub fn take_paired() -> Vec<PeerConfig> {
 /// Drains devices unpaired since the last call so the runtime can drop their links.
 pub fn take_unpaired() -> Vec<DeviceId> {
     UNPAIRED.with(|cell| std::mem::take(&mut *cell.borrow_mut()))
+}
+
+/// Reflects a live link coming up or going down on the open window.
+pub fn set_online(device: DeviceId, online: bool) {
+    with_window(|window| {
+        let changed = if online {
+            window.online.insert(device)
+        } else {
+            window.online.remove(&device)
+        };
+        if !changed {
+            return;
+        }
+        if let Some(mtm) = MainThreadMarker::new() {
+            let entries = window.nearby.clone();
+            window.nearby.clear();
+            window.refresh_nearby(mtm, entries);
+        }
+        if window.last_target == Some(device) {
+            let name = device.short();
+            if online {
+                window.set_status(&format!("Connected to {name}."));
+            } else {
+                window.set_status(&format!("Disconnected from {name}; retrying…"));
+            }
+        }
+    });
 }
 
 define_class!(
@@ -130,7 +161,12 @@ impl PairingTarget {
     }
 }
 
-pub fn open(discovered: Vec<(DeviceId, SocketAddr)>, paired: Vec<DeviceId>, map: AddressMap) {
+pub fn open(
+    discovered: Vec<(DeviceId, SocketAddr)>,
+    paired: Vec<DeviceId>,
+    online: Vec<DeviceId>,
+    map: AddressMap,
+) {
     let Some(mtm) = MainThreadMarker::new() else {
         tracing::warn!("pairing window requested off the main thread");
         return;
@@ -148,6 +184,7 @@ pub fn open(discovered: Vec<(DeviceId, SocketAddr)>, paired: Vec<DeviceId>, map:
         // nearby list on every open; otherwise a device paired when the window was
         // first created stays filtered out.
         window.paired = paired;
+        window.online = online.into_iter().collect();
         let entries = filter_nearby(discovered, window.local);
         window.refresh_nearby(mtm, entries);
         tracing::info!(nearby = window.nearby.len(), "pairing window opened");
@@ -321,6 +358,8 @@ impl PairingWindow {
             nearby: Vec::new(),
             map,
             paired,
+            online: HashSet::new(),
+            last_target: None,
             local,
             pair_button,
             wait_button,
@@ -366,6 +405,9 @@ impl PairingWindow {
                 let mut title = format!("{}  ·  {address}", id.short());
                 if paired {
                     title.push_str("  (paired)");
+                }
+                if self.online.contains(&id) {
+                    title.push_str("  (connected)");
                 }
                 let y = HEIGHT - 112.0 - index as f64 * ROW_HEIGHT;
                 let row_width = if paired {
@@ -418,6 +460,9 @@ impl PairingWindow {
                 self.set_interactive(false, true, true);
             }
             UiEvent::Paired(peer) => {
+                if let Ok(key) = hex::decode(&peer.public_key) {
+                    self.last_target = Some(device_id_from_public(&key));
+                }
                 match pairing::save_peer(&peer) {
                     Ok(()) => {
                         tracing::info!(peer = %peer.name, address = %peer.display_address(), "paired device");

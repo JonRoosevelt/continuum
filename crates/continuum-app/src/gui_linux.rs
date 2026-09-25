@@ -63,6 +63,11 @@ fn tick(app: &Rc<RefCell<App>>, receiver: &mpsc::Receiver<NetEvent>) {
     }
 
     while let Ok(event) = receiver.try_recv() {
+        match &event {
+            crate::net::NetEvent::PeerUp(device) => pairing_ui::set_online(*device, true),
+            crate::net::NetEvent::PeerDown(device) => pairing_ui::set_online(*device, false),
+            _ => {}
+        }
         app.borrow_mut().core.handle_event(event);
     }
 
@@ -93,7 +98,11 @@ fn apply_action(app: &Rc<RefCell<App>>, action: TrayAction) {
         TrayAction::SendNow => app.borrow().core.send_now(),
         TrayAction::Pair => {
             let app = app.borrow();
-            pairing_ui::open(app.core.discovered_map(), app.core.paired_device_ids());
+            pairing_ui::open(
+                app.core.discovered_map(),
+                app.core.paired_device_ids(),
+                app.core.online_device_ids(),
+            );
         }
         TrayAction::Quit => app.borrow_mut().quit = true,
         TrayAction::None => {}
