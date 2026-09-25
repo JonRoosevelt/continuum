@@ -8,48 +8,15 @@ mod service;
 #[cfg(feature = "tray")]
 mod tray;
 
-use std::collections::{HashSet, VecDeque};
 use std::sync::{mpsc, Arc};
 
-use continuum_core::{ClipboardItem, ContentHash, DeviceId, Version};
+use continuum_core::{ClipboardItem, DeviceId, Version};
 use continuum_net::Identity;
 use monitor::Monitor;
-
-const RECENT_CAPACITY: usize = 256;
-
-struct Recent {
-    set: HashSet<ContentHash>,
-    order: VecDeque<ContentHash>,
-}
-
-impl Recent {
-    fn new() -> Self {
-        Self {
-            set: HashSet::new(),
-            order: VecDeque::new(),
-        }
-    }
-
-    /// Returns `true` if the hash was not seen recently.
-    fn insert(&mut self, hash: ContentHash) -> bool {
-        if !self.set.insert(hash) {
-            return false;
-        }
-        self.order.push_back(hash);
-        if self.order.len() > RECENT_CAPACITY {
-            if let Some(oldest) = self.order.pop_front() {
-                self.set.remove(&oldest);
-            }
-        }
-        true
-    }
-}
-
 pub(crate) struct Core {
     pub(crate) monitor: Monitor,
     registry: net::Registry,
     waker: net::Waker,
-    recent: Recent,
     last_version: Option<Version>,
     last_item: Option<ClipboardItem>,
     paused: bool,
@@ -67,7 +34,6 @@ impl Core {
             monitor: Monitor::open(device_id)?,
             registry,
             waker,
-            recent: Recent::new(),
             last_version: None,
             last_item: None,
             paused: false,
@@ -77,18 +43,16 @@ impl Core {
     pub(crate) fn poll(&mut self) -> anyhow::Result<()> {
         if let Some(item) = self.monitor.poll()? {
             self.last_version = Some(item.version);
-            if self.recent.insert(item.hash) {
-                tracing::info!(
-                    hash = %item.hash,
-                    preview = %item.plain_text().map_or_else(|| "<non-text>".into(), preview),
-                    "local clipboard changed"
-                );
-                if !self.paused {
-                    net::broadcast(&self.registry, &item);
-                    // Clipboard activity also nudges any parked reconnect loops, so links
-                    // come up immediately when a peer has just returned.
-                    self.waker.wake();
-                }
+            tracing::info!(
+                hash = %item.hash,
+                preview = %item.plain_text().map_or_else(|| "<non-text>".into(), preview),
+                "local clipboard changed"
+            );
+            if !self.paused {
+                net::broadcast(&self.registry, &item);
+                // Clipboard activity also nudges any parked reconnect loops, so links
+                // come up immediately when a peer has just returned.
+                self.waker.wake();
             }
             self.last_item = Some(item);
         }
@@ -102,9 +66,6 @@ impl Core {
         }
         if self.last_version.is_some_and(|last| item.version <= last) {
             tracing::debug!(from = %item.origin.short(), "dropped stale remote clipboard");
-            return;
-        }
-        if !self.recent.insert(item.hash) {
             return;
         }
         self.monitor.observe(item.version);
@@ -417,37 +378,4 @@ fn init_tracing() {
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
         .init();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn hash(seed: usize) -> ContentHash {
-        let mut bytes = [0u8; 32];
-        bytes[..8].copy_from_slice(&(seed as u64).to_le_bytes());
-        ContentHash::from_bytes(bytes)
-    }
-
-    #[test]
-    fn recent_deduplicates() {
-        let mut recent = Recent::new();
-        assert!(recent.insert(hash(1)));
-        assert!(!recent.insert(hash(1)));
-        assert!(recent.insert(hash(2)));
-    }
-
-    #[test]
-    fn recent_evicts_oldest() {
-        let mut recent = Recent::new();
-        for seed in 0..RECENT_CAPACITY {
-            assert!(recent.insert(hash(seed)));
-        }
-        assert_eq!(recent.set.len(), RECENT_CAPACITY);
-
-        assert!(recent.insert(hash(RECENT_CAPACITY)));
-        assert!(!recent.insert(hash(RECENT_CAPACITY)));
-        assert!(recent.insert(hash(0)));
-        assert_eq!(recent.set.len(), RECENT_CAPACITY);
-    }
 }
