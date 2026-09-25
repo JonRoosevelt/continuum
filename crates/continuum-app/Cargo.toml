@@ -14,14 +14,13 @@ path = "src/main.rs"
 
 [features]
 default = ["tray"]
-tray = ["dep:tray-icon", "dep:muda", "dep:tao"]
+tray = ["dep:tray-icon", "dep:tao"]
 
 [dependencies]
 continuum-core.workspace = true
 continuum-platform.workspace = true
 continuum-net.workspace = true
-tray-icon = { version = "0.24.2", optional = true }
-muda = { version = "0.19.3", optional = true }
+tray-icon = { version = "0.24.2", optional = true, default-features = false, features = ["gtk"] }
 tao = { version = "0.36.0", optional = true }
 anyhow = "1.0.104"
 tracing = "0.1.44"
@@ -65,6 +64,9 @@ objc2-foundation = { version = "0.3.2", features = [
 
 [target.'cfg(target_os="macos")'.dependencies]
 objc2-quartz-core = { version = "0.3.2", features = ["CALayer"] }
+
+[target.'cfg(target_os="linux")'.dependencies]
+gtk = "0.18"
 
 [lints]
 workspace = true

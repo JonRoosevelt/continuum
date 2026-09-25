@@ -108,7 +108,7 @@ fn systemd_unit(exe: &str) -> String {
          After=graphical-session.target\n\
          PartOf=graphical-session.target\n\n\
          [Service]\n\
-         ExecStart={exe} --headless\n\
+         ExecStart={exe}\n\
          Restart=on-failure\n\
          RestartSec=2\n\n\
          [Install]\n\

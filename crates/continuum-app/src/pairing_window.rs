@@ -117,18 +117,18 @@ pub fn open(discovered: Vec<(DeviceId, SocketAddr)>, paired: Vec<DeviceId>, map:
 
     WINDOW.with(|cell| {
         let mut slot = cell.borrow_mut();
-        let mut created = false;
         if slot.is_none() {
-            *slot = Some(PairingWindow::new(mtm, map, paired));
-            created = true;
+            *slot = Some(PairingWindow::new(mtm, map, paired.clone()));
         }
         let Some(window) = slot.as_mut() else {
             return;
         };
-        if created {
-            let entries = filter_nearby(discovered, &window.paired, window.local);
-            window.refresh_nearby(mtm, entries);
-        }
+        // The window is created once and reused, so refresh the paired set and the
+        // nearby list on every open; otherwise a device paired when the window was
+        // first created stays filtered out.
+        window.paired = paired;
+        let entries = filter_nearby(discovered, &window.paired, window.local);
+        window.refresh_nearby(mtm, entries);
         window.window.makeKeyAndOrderFront(None);
         // An accessory app is normally inactive, so the text field will not accept
         // typing until the app is explicitly activated.

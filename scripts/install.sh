@@ -2,12 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-FEATURES=()
-if [ "$(uname)" = "Linux" ]; then
-  FEATURES=(--no-default-features)
-fi
-
-cargo build --release -p continuum-app "${FEATURES[@]}"
+cargo build --release -p continuum-app
 
 DEST="${HOME}/.local/bin"
 mkdir -p "$DEST"

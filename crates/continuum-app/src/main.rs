@@ -1,7 +1,9 @@
 mod config;
 mod discovery;
-#[cfg(feature = "tray")]
+#[cfg(all(target_os = "macos", feature = "tray"))]
 mod gui;
+#[cfg(all(target_os = "linux", feature = "tray"))]
+mod gui_linux;
 #[cfg(all(target_os = "macos", feature = "tray"))]
 mod hud;
 mod monitor;
@@ -278,10 +280,19 @@ fn main() {
 }
 
 fn run_default() {
-    #[cfg(feature = "tray")]
+    #[cfg(all(target_os = "macos", feature = "tray"))]
     gui::run();
 
-    #[cfg(not(feature = "tray"))]
+    #[cfg(all(target_os = "linux", feature = "tray"))]
+    if let Err(err) = gui_linux::run() {
+        tracing::error!(%err, "gui failed");
+        std::process::exit(1);
+    }
+
+    #[cfg(not(any(
+        all(target_os = "macos", feature = "tray"),
+        all(target_os = "linux", feature = "tray"),
+    )))]
     run_headless_exit();
 }
 
