@@ -1,4 +1,5 @@
 use std::io::Read as _;
+use std::time::{Duration, Instant};
 
 use continuum_core::{
     content_hash, ClipItem, ContentHash, Representation, PLAIN_TEXT_MIME, PNG_MIME,
@@ -66,6 +67,20 @@ impl WaylandClipboard {
             Err(err) => Err(ClipboardError::Read(err.to_string())),
         }
     }
+
+    /// Blocks until the clipboard reflects `representation`, so a poll right after a large
+    /// `wl-copy` write does not read the stale clipboard and rebroadcast it.
+    fn await_written(&self, representation: &Representation) {
+        let deadline = Instant::now() + Duration::from_millis(3000);
+        while Instant::now() < deadline {
+            if let Ok(Some(bytes)) = self.fetch(PasteMimeType::Specific(&representation.mime)) {
+                if bytes == representation.bytes {
+                    return;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
 }
 
 impl ClipboardBackend for WaylandClipboard {
@@ -123,6 +138,7 @@ impl ClipboardBackend for WaylandClipboard {
 
         if total > INLINE_MAX {
             let written = write_via_wl_copy(items)?;
+            self.await_written(&written);
             let seeded = ClipItem::new(vec![written])?;
             self.last_hash = Some(content_hash(std::slice::from_ref(&seeded)));
         } else {
