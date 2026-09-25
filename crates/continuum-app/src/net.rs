@@ -6,13 +6,16 @@ use std::thread::{self, Thread};
 use std::time::Duration;
 
 use continuum_core::{ClipboardItem, DeviceId};
-use continuum_net::{Identity, Message, Peer};
+use continuum_net::{device_id_from_public, Identity, Message, Peer};
 
 use crate::config::Config;
+use crate::discovery::AddressMap;
 
 static CONNECTION_SEQ: AtomicU64 = AtomicU64::new(0);
 const RECONNECT_MIN: Duration = Duration::from_millis(500);
 const RECONNECT_MAX: Duration = Duration::from_secs(3);
+// A peer with no resolvable address waits on the discovery waker rather than hot-looping.
+const DISCOVERY_WAIT: Duration = Duration::from_secs(10);
 // Keep below the transport frame limit so an oversized payload is skipped, not fatal.
 const MAX_PAYLOAD: usize = 128 * 1024 * 1024;
 
@@ -39,12 +42,26 @@ pub(crate) struct Slot {
 
 pub(crate) type Registry = Arc<Mutex<HashMap<DeviceId, Slot>>>;
 
-/// Wakes parked reconnect loops so clipboard activity can bring links up immediately.
+/// Wakes parked reconnect loops so discovery changes and clipboard activity can bring
+/// links up immediately.
+#[derive(Clone)]
 pub(crate) struct Waker {
     threads: Arc<Mutex<Vec<Thread>>>,
 }
 
+impl Default for Waker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Waker {
+    pub(crate) fn new() -> Self {
+        Self {
+            threads: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
     pub(crate) fn wake(&self) {
         for thread in self.threads.lock().expect("waker mutex").iter() {
             thread.unpark();
@@ -105,6 +122,8 @@ pub(crate) fn send_to(registry: &Registry, device: DeviceId, item: &ClipboardIte
 pub(crate) fn start<E>(
     identity: Arc<Identity>,
     config: &Config,
+    addresses: AddressMap,
+    waker: Waker,
     on_event: E,
 ) -> anyhow::Result<(Registry, Waker)>
 where
@@ -113,7 +132,7 @@ where
     let registry: Registry = Arc::new(Mutex::new(HashMap::new()));
     let on_event: Arc<dyn Fn(NetEvent) + Send + Sync> = Arc::new(on_event);
     let local_id = identity.device_id();
-    let threads: Arc<Mutex<Vec<Thread>>> = Arc::new(Mutex::new(Vec::new()));
+    let threads = Arc::clone(&waker.threads);
     let allowed: Arc<Vec<Vec<u8>>> = Arc::new(
         config
             .peers
@@ -150,17 +169,34 @@ where
             tracing::warn!(name = %peer.name, "invalid public key in config; skipping peer");
             continue;
         };
-        let address = peer.address.clone();
+        let remote_id = device_id_from_public(&key);
+        let static_address = peer.address.clone();
         let name = peer.name.clone();
         let registry = Arc::clone(&registry);
         let identity = Arc::clone(&identity);
         let on_event = Arc::clone(&on_event);
+        let addresses = Arc::clone(&addresses);
         let threads = Arc::clone(&threads);
         thread::spawn(move || {
             threads.lock().expect("waker mutex").push(thread::current());
             let mut backoff = RECONNECT_MIN;
             loop {
-                match Peer::connect(&address, &identity, &key) {
+                let target = {
+                    let discovered = addresses
+                        .lock()
+                        .expect("discovery map")
+                        .get(&remote_id)
+                        .copied();
+                    discovered
+                        .map(|addr| addr.to_string())
+                        .or_else(|| static_address.clone())
+                };
+                let Some(target) = target else {
+                    tracing::debug!(%name, "no address for peer; waiting for discovery");
+                    thread::park_timeout(DISCOVERY_WAIT);
+                    continue;
+                };
+                match Peer::connect(target.as_str(), &identity, &key) {
                     Ok(peer) => {
                         backoff = RECONNECT_MIN;
                         register(
@@ -171,7 +207,7 @@ where
                             Arc::clone(&on_event),
                         );
                     }
-                    Err(err) => tracing::debug!(%name, %err, "connect failed"),
+                    Err(err) => tracing::debug!(%name, %target, %err, "connect failed"),
                 }
                 thread::park_timeout(backoff);
                 backoff = (backoff * 2).min(RECONNECT_MAX);
@@ -179,7 +215,7 @@ where
         });
     }
 
-    Ok((registry, Waker { threads }))
+    Ok((registry, waker))
 }
 
 /// Registers a connection, resolving duplicates so both peers converge on the same one.

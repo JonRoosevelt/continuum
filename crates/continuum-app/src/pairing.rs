@@ -195,7 +195,7 @@ pub fn pair(host: &str) -> anyhow::Result<()> {
     save_peer(&peer)?;
     println!(
         "Paired: added {}. Restart Continuum to connect.",
-        peer.address
+        peer.display_address()
     );
     Ok(())
 }
@@ -222,7 +222,7 @@ pub fn pair_listen() -> anyhow::Result<()> {
         started.approve()?;
         println!(
             "Paired: added {}. Restart Continuum to connect.",
-            peer.address
+            peer.display_address()
         );
     } else {
         started.deny();
@@ -258,7 +258,7 @@ fn peer_label(name: &str, key: &[u8]) -> String {
 fn add_peer(name: &str, address: &str, public_key: &[u8]) -> PeerConfig {
     PeerConfig {
         name: name.to_string(),
-        address: address.to_string(),
+        address: Some(address.to_string()),
         public_key: hex::encode(public_key),
     }
 }

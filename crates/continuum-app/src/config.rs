@@ -6,8 +6,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerConfig {
     pub name: String,
-    pub address: String,
+    #[serde(default)]
+    pub address: Option<String>,
     pub public_key: String,
+}
+
+impl PeerConfig {
+    #[must_use]
+    pub fn display_address(&self) -> &str {
+        self.address.as_deref().unwrap_or("(discovered)")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

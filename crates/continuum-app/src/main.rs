@@ -1,4 +1,5 @@
 mod config;
+mod discovery;
 #[cfg(feature = "tray")]
 mod gui;
 #[cfg(all(target_os = "macos", feature = "tray"))]
@@ -13,7 +14,8 @@ mod service;
 #[cfg(feature = "tray")]
 mod tray;
 
-use std::sync::{mpsc, Arc};
+use std::collections::HashMap;
+use std::sync::{mpsc, Arc, Mutex};
 
 use continuum_core::{ClipboardItem, DeviceId, Version};
 use continuum_net::{Identity, Message};
@@ -23,6 +25,7 @@ pub(crate) struct Core {
     pub(crate) monitor: Monitor,
     registry: net::Registry,
     waker: net::Waker,
+    _discovery: Option<discovery::Discovery>,
     last_version: Option<Version>,
     last_item: Option<ClipboardItem>,
     paused: bool,
@@ -35,11 +38,27 @@ impl Core {
         on_event: impl Fn(net::NetEvent) + Send + Sync + 'static,
     ) -> anyhow::Result<Self> {
         let device_id = identity.device_id();
-        let (registry, waker) = net::start(Arc::clone(&identity), config, on_event)?;
+        let addresses: discovery::AddressMap = Arc::new(Mutex::new(HashMap::new()));
+        let waker = net::Waker::new();
+        let discovery = listen_port(&config.listen).and_then(|port| {
+            match discovery::start(device_id, port, Arc::clone(&addresses), waker.clone()) {
+                Ok(discovery) => Some(discovery),
+                Err(err) => {
+                    tracing::warn!(
+                        %err,
+                        "mDNS discovery unavailable; using static peer addresses only"
+                    );
+                    None
+                }
+            }
+        });
+        let (registry, waker) =
+            net::start(Arc::clone(&identity), config, addresses, waker, on_event)?;
         Ok(Self {
             monitor: Monitor::open(device_id)?,
             registry,
             waker,
+            _discovery: discovery,
             last_version: None,
             last_item: None,
             paused: false,
@@ -183,6 +202,13 @@ pub(crate) fn load() -> anyhow::Result<Loaded> {
     Ok(Loaded { identity, config })
 }
 
+fn listen_port(listen: &str) -> Option<u16> {
+    if let Ok(addr) = listen.parse::<std::net::SocketAddr>() {
+        return Some(addr.port());
+    }
+    listen.rsplit(':').next()?.parse().ok()
+}
+
 fn apply_download_dir(config: &config::Config) {
     let dir = config
         .download_dir
@@ -257,7 +283,11 @@ fn show_status() -> anyhow::Result<()> {
     println!("peers    : {}", config.peers.len());
     for peer in &config.peers {
         let short: String = peer.public_key.chars().take(16).collect();
-        println!("  - {:<12} {:<24} {short}…", peer.name, peer.address);
+        println!(
+            "  - {:<12} {:<24} {short}…",
+            peer.name,
+            peer.display_address()
+        );
     }
     Ok(())
 }
@@ -278,7 +308,7 @@ fn peer_command(args: &[String]) -> anyhow::Result<()> {
             let mut config = config::Config::load_or_create(&path)?;
             config.upsert_peer(config::PeerConfig {
                 name: name.clone(),
-                address: address.clone(),
+                address: Some(address.clone()),
                 public_key: public_key.clone(),
             });
             config.save(&path)?;

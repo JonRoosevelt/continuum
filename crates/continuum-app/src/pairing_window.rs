@@ -255,7 +255,7 @@ impl PairingWindow {
             UiEvent::Paired(peer) => {
                 match pairing::save_peer(&peer) {
                     Ok(()) => {
-                        tracing::info!(peer = %peer.name, address = %peer.address, "paired device");
+                        tracing::info!(peer = %peer.name, address = %peer.display_address(), "paired device");
                         self.set_status(&format!(
                             "Paired with {}. Restart Continuum to connect.",
                             peer.name
