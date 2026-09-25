@@ -50,7 +50,11 @@ macOS 15.4+ may ask for pasteboard access — allow Continuum if sync stalls.
 
 ### Linux
 
-The quickest path is a source build, which includes the GTK tray:
+The prebuilt `continuum-X.Y.Z-x86_64-linux.tar.gz` includes the GTK tray. Drop the
+`continuum` binary in `~/.local/bin` and run it, or register it to start at login with
+`continuum install-service`.
+
+To build from source:
 
 ```sh
 git clone https://github.com/JonRoosevelt/continuum
@@ -58,12 +62,11 @@ cd continuum
 scripts/install.sh
 ```
 
-An Arch `PKGBUILD` is in [`packaging/`](packaging). The prebuilt
-`continuum-X.Y.Z-x86_64-linux.tar.gz` is the **headless** daemon (no tray) — drop it in
-`~/.local/bin` and run it as a service if you don't need a tray.
+An Arch `PKGBUILD` is in [`packaging/`](packaging).
 
 On Wayland you also need `wl-clipboard`, and the tray needs an AppIndicator /
-StatusNotifier host.
+StatusNotifier host plus `libayatana-appindicator` at runtime. Without a tray host, run
+`continuum --headless` and use the CLI.
 
 ## Pair two devices
 
@@ -214,7 +217,7 @@ scripts/bundle-macos.sh                                        # dist/Continuum.
 Push a `vX.Y.Z` tag and CI publishes a GitHub Release with:
 
 - `Continuum-X.Y.Z.zip` — macOS `.app` (unsigned, ad-hoc signed for local use)
-- `continuum-X.Y.Z-x86_64-linux.tar.gz` — headless Linux binary
+- `continuum-X.Y.Z-x86_64-linux.tar.gz` — Linux binary with the GTK tray
 - `SHA256SUMS`
 
-Released under the MIT license.
+Released under the [MIT license](LICENSE).

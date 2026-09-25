@@ -1,19 +1,19 @@
 # Template Arch PKGBUILD. Set url/pkgver before use.
 pkgname=continuum
-pkgver=0.1.4
+pkgver=0.1.5
 pkgrel=1
 pkgdesc="Clipboard sync between macOS and Linux over the LAN"
 arch=('x86_64' 'aarch64')
 url=""
 license=('MIT')
-depends=('wl-clipboard')
-makedepends=('cargo' 'rust')
+depends=('wl-clipboard' 'gtk3' 'libayatana-appindicator')
+makedepends=('cargo' 'rust' 'gtk3')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 build() {
   cd "$pkgname-$pkgver"
-  cargo build --release --no-default-features -p continuum-app
+  cargo build --release -p continuum-app
 }
 
 package() {

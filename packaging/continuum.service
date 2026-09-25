@@ -4,7 +4,7 @@ After=graphical-session.target
 PartOf=graphical-session.target
 
 [Service]
-ExecStart=%h/.local/bin/continuum --headless
+ExecStart=%h/.local/bin/continuum
 Restart=on-failure
 RestartSec=2
 
