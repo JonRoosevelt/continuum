@@ -3,9 +3,10 @@
 Tray-only clipboard sync between macOS and Linux over the local network. No cloud,
 no account, no telemetry — copy on one machine and paste on another.
 
-Status: plain-text sync between macOS and Linux (Wayland) is working end-to-end
-over LAN/Tailscale. Rich formats, images, packaging and more are tracked in
-[TASKS.md](TASKS.md).
+Status: plain text and images sync between macOS and Linux (Wayland) end-to-end
+over LAN/Tailscale; packaging and more are tracked in [TASKS.md](TASKS.md).
+HTML/RTF are intentionally **not** synced — web apps put styled HTML on the
+clipboard, and re-offering it corrupts pasted text on Linux.
 
 ## How it works
 

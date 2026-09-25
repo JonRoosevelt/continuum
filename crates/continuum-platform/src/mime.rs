@@ -1,14 +1,12 @@
-use continuum_core::{HTML_MIME, PLAIN_TEXT_MIME, PNG_MIME, RTF_MIME, TIFF_MIME};
+use continuum_core::{PLAIN_TEXT_MIME, PNG_MIME};
 
-pub const SUPPORTED: &[&str] = &[PLAIN_TEXT_MIME, HTML_MIME, RTF_MIME, PNG_MIME, TIFF_MIME];
+pub const SUPPORTED: &[&str] = &[PLAIN_TEXT_MIME, PNG_MIME];
 
 #[cfg(target_os = "macos")]
 pub mod native {
-    use continuum_core::{HTML_MIME, PLAIN_TEXT_MIME, PNG_MIME, RTF_MIME, TIFF_MIME};
+    use continuum_core::{PLAIN_TEXT_MIME, PNG_MIME, TIFF_MIME};
 
     pub const PLAIN_TEXT: &str = "public.utf8-plain-text";
-    pub const HTML: &str = "public.html";
-    pub const RTF: &str = "public.rtf";
     pub const PNG: &str = "public.png";
     pub const TIFF: &str = "public.tiff";
 
@@ -16,10 +14,7 @@ pub mod native {
     pub fn to_native(mime: &str) -> Option<&'static str> {
         match mime {
             PLAIN_TEXT_MIME => Some(PLAIN_TEXT),
-            HTML_MIME => Some(HTML),
-            RTF_MIME => Some(RTF),
             PNG_MIME => Some(PNG),
-            TIFF_MIME => Some(TIFF),
             _ => None,
         }
     }
@@ -28,8 +23,6 @@ pub mod native {
     pub fn from_native(native: &str) -> Option<&'static str> {
         match native {
             PLAIN_TEXT => Some(PLAIN_TEXT_MIME),
-            HTML => Some(HTML_MIME),
-            RTF => Some(RTF_MIME),
             PNG => Some(PNG_MIME),
             TIFF => Some(TIFF_MIME),
             _ => None,

@@ -9,8 +9,7 @@ use x11rb::rust_connection::RustConnection;
 use x11rb::wrapper::ConnectionExt as _;
 
 use continuum_core::{
-    content_hash, ClipItem, ContentHash, Representation, HTML_MIME, PLAIN_TEXT_MIME, PNG_MIME,
-    RTF_MIME,
+    content_hash, ClipItem, ContentHash, Representation, PLAIN_TEXT_MIME, PNG_MIME,
 };
 
 use crate::backend::{ClipboardBackend, ClipboardError};
@@ -24,8 +23,6 @@ struct Atoms {
     text: Atom,
     string: Atom,
     plain: Atom,
-    html: Atom,
-    rtf: Atom,
     png: Atom,
     incr: Atom,
     timestamp: Atom,
@@ -80,8 +77,6 @@ impl X11Clipboard {
             text: intern(&conn, "TEXT", false)?,
             string: intern(&conn, "STRING", false)?,
             plain: intern(&conn, PLAIN_TEXT_MIME, false)?,
-            html: intern(&conn, HTML_MIME, false)?,
-            rtf: intern(&conn, RTF_MIME, false)?,
             png: intern(&conn, PNG_MIME, false)?,
             incr: intern(&conn, "INCR", false)?,
             timestamp: intern(&conn, "TIMESTAMP", false)?,
@@ -130,18 +125,6 @@ impl X11Clipboard {
         }
         if owned
             .iter()
-            .any(|item| item.representation(HTML_MIME).is_some())
-        {
-            targets.push(self.atoms.html);
-        }
-        if owned
-            .iter()
-            .any(|item| item.representation(RTF_MIME).is_some())
-        {
-            targets.push(self.atoms.rtf);
-        }
-        if owned
-            .iter()
             .any(|item| item.representation(PNG_MIME).is_some())
         {
             targets.push(self.atoms.png);
@@ -162,12 +145,6 @@ impl X11Clipboard {
                         {
                             return Some(representation.bytes.clone());
                         }
-                    }
-                    HTML_MIME if target == self.atoms.html => {
-                        return Some(representation.bytes.clone())
-                    }
-                    RTF_MIME if target == self.atoms.rtf => {
-                        return Some(representation.bytes.clone())
                     }
                     PNG_MIME if target == self.atoms.png => {
                         return Some(representation.bytes.clone())
@@ -365,16 +342,6 @@ impl ClipboardBackend for X11Clipboard {
                     representations.push(Representation::new(PLAIN_TEXT_MIME, bytes));
                     break;
                 }
-            }
-        }
-        if let Some(bytes) = self.fetch_bytes(self.atoms.clipboard, self.atoms.html)? {
-            if !bytes.is_empty() {
-                representations.push(Representation::new(HTML_MIME, bytes));
-            }
-        }
-        if let Some(bytes) = self.fetch_bytes(self.atoms.clipboard, self.atoms.rtf)? {
-            if !bytes.is_empty() {
-                representations.push(Representation::new(RTF_MIME, bytes));
             }
         }
         if let Some(bytes) = self.fetch_bytes(self.atoms.clipboard, self.atoms.png)? {

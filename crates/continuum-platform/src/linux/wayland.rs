@@ -1,8 +1,7 @@
 use std::io::Read as _;
 
 use continuum_core::{
-    content_hash, ClipItem, ContentHash, Representation, HTML_MIME, PLAIN_TEXT_MIME, PNG_MIME,
-    RTF_MIME,
+    content_hash, ClipItem, ContentHash, Representation, PLAIN_TEXT_MIME, PNG_MIME,
 };
 use wl_clipboard_rs::copy::{
     self, ClipboardType as CopyClipboardType, MimeSource, Options, Seat as CopySeat, Source,
@@ -98,12 +97,6 @@ impl ClipboardBackend for WaylandClipboard {
         if let Some(bytes) = self.fetch(PasteMimeType::Text)? {
             representations.push(Representation::new(PLAIN_TEXT_MIME, bytes));
         }
-        if let Some(bytes) = self.fetch(PasteMimeType::Specific(HTML_MIME))? {
-            representations.push(Representation::new(HTML_MIME, bytes));
-        }
-        if let Some(bytes) = self.fetch(PasteMimeType::Specific(RTF_MIME))? {
-            representations.push(Representation::new(RTF_MIME, bytes));
-        }
         if let Some(bytes) = self.fetch(PasteMimeType::Specific(PNG_MIME))? {
             representations.push(Representation::new(PNG_MIME, bytes));
         }
@@ -129,12 +122,13 @@ impl ClipboardBackend for WaylandClipboard {
             .sum();
 
         if total > INLINE_MAX {
-            write_via_wl_copy(items)?;
+            let written = write_via_wl_copy(items)?;
+            let seeded = ClipItem::new(vec![written])?;
+            self.last_hash = Some(content_hash(std::slice::from_ref(&seeded)));
         } else {
             write_inline(items)?;
+            self.last_hash = Some(content_hash(items));
         }
-
-        self.last_hash = Some(content_hash(items));
         Ok(())
     }
 }
@@ -144,7 +138,7 @@ impl ClipboardBackend for WaylandClipboard {
 const INLINE_MAX: usize = 48 * 1024;
 
 fn is_supported(mime: &str) -> bool {
-    matches!(mime, PLAIN_TEXT_MIME | HTML_MIME | RTF_MIME | PNG_MIME)
+    matches!(mime, PLAIN_TEXT_MIME | PNG_MIME)
 }
 
 fn write_inline(items: &[ClipItem]) -> Result<(), ClipboardError> {
@@ -153,9 +147,7 @@ fn write_inline(items: &[ClipItem]) -> Result<(), ClipboardError> {
         for representation in &item.representations {
             let mime_type = match representation.mime.as_str() {
                 PLAIN_TEXT_MIME => copy::MimeType::Text,
-                HTML_MIME | RTF_MIME | PNG_MIME => {
-                    copy::MimeType::Specific(representation.mime.clone())
-                }
+                PNG_MIME => copy::MimeType::Specific(representation.mime.clone()),
                 _ => continue,
             };
             sources.push(MimeSource {
@@ -179,12 +171,17 @@ fn write_inline(items: &[ClipItem]) -> Result<(), ClipboardError> {
 }
 
 /// Large payloads: offer the single best representation through `wl-copy`.
-fn write_via_wl_copy(items: &[ClipItem]) -> Result<(), ClipboardError> {
-    let preference = [PNG_MIME, HTML_MIME, RTF_MIME, PLAIN_TEXT_MIME];
+///
+/// Only one representation can be offered this way, so text is preferred over HTML: handing
+/// HTML to `wl-copy` makes it offer `text/plain` with the same HTML bytes, which corrupts
+/// pasted text.
+fn write_via_wl_copy(items: &[ClipItem]) -> Result<Representation, ClipboardError> {
+    let preference = [PNG_MIME, PLAIN_TEXT_MIME];
     let representation = preference
         .iter()
         .find_map(|mime| items.iter().find_map(|item| item.representation(mime)))
-        .ok_or_else(|| ClipboardError::Write("no supported representation".into()))?;
+        .ok_or_else(|| ClipboardError::Write("no supported representation".into()))?
+        .clone();
 
     let mut child = std::process::Command::new("wl-copy")
         .args(["--type", &representation.mime, "--foreground"])
@@ -205,5 +202,5 @@ fn write_via_wl_copy(items: &[ClipItem]) -> Result<(), ClipboardError> {
         drop(stdin);
         let _ = child.wait();
     });
-    Ok(())
+    Ok(representation)
 }
