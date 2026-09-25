@@ -10,6 +10,21 @@ end-to-end over LAN/Tailscale; packaging and more are tracked in
 web apps put styled HTML on the clipboard, and re-offering it corrupts pasted
 text on Linux.
 
+## Examples
+
+Copy on one machine, paste on the other.
+
+**Text** — copy text on one device and paste it on the other:
+
+![Copy text, then paste text on the other device](docs/media/copy-text-then-paste-text.gif)
+
+**Image** — copy an image on one device and paste it on the other:
+
+![Copy image, then paste image on the other device](docs/media/copy-image-then-paste-image.gif)
+
+Full-quality clips: [text](docs/media/copy-text-then-paste-text.mp4) ·
+[image](docs/media/copy-image-then-paste-image.mp4).
+
 ## How it works
 
 - Each OS captures clipboard changes (macOS `NSPasteboard`, Linux Wayland
