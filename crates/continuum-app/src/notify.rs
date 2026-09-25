@@ -78,8 +78,8 @@ fn hyprland_signature() -> Option<String> {
 }
 
 #[cfg(all(target_os = "macos", feature = "tray"))]
-fn on_start(name: &str, size: u64, _from: DeviceId) {
-    crate::hud::show(name, size);
+fn on_start(name: &str, size: u64, from: DeviceId) {
+    crate::hud::show(name, size, &from.short());
 }
 
 #[cfg(all(target_os = "macos", feature = "tray"))]

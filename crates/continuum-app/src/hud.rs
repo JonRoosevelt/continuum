@@ -6,21 +6,30 @@ use std::time::{Duration, Instant};
 use objc2::rc::Retained;
 use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSBackingStoreType, NSColor, NSFont, NSPanel, NSProgressIndicator, NSProgressIndicatorStyle,
-    NSScreen, NSStatusWindowLevel, NSTextField, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
+    NSBackingStoreType, NSColor, NSControlSize, NSEvent, NSFont, NSImage, NSImageView,
+    NSLineBreakMode, NSPanel, NSProgressIndicator, NSProgressIndicatorStyle, NSScreen,
+    NSStatusWindowLevel, NSTextField, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
     NSVisualEffectState, NSVisualEffectView, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 
-const WIDTH: f64 = 280.0;
-const HEIGHT: f64 = 56.0;
+const WIDTH: f64 = 300.0;
+const HEIGHT: f64 = 64.0;
 const TOP_MARGIN: f64 = 44.0;
+const CORNER_RADIUS: f64 = 14.0;
+const ICON_SIZE: f64 = 32.0;
+const ICON_X: f64 = 16.0;
+const TEXT_X: f64 = 58.0;
+const SPINNER_SIZE: f64 = 16.0;
+const SPINNER_RIGHT: f64 = 30.0;
+const TEXT_WIDTH: f64 = WIDTH - SPINNER_RIGHT - 8.0 - TEXT_X;
 const AUTO_HIDE: Duration = Duration::from_secs(30);
 const MIN_VISIBLE: Duration = Duration::from_millis(1800);
 
 struct Hud {
     panel: Retained<NSPanel>,
-    label: Retained<NSTextField>,
+    title: Retained<NSTextField>,
+    subtitle: Retained<NSTextField>,
     progress: Retained<NSProgressIndicator>,
     shown_at: Option<Instant>,
     deadline: Option<Instant>,
@@ -30,7 +39,7 @@ thread_local! {
     static HUD: RefCell<Option<Hud>> = const { RefCell::new(None) };
 }
 
-pub fn show(name: &str, size: u64) {
+pub fn show(name: &str, size: u64, device: &str) {
     let Some(mtm) = MainThreadMarker::new() else {
         tracing::warn!("transfer hud requested off the main thread");
         return;
@@ -49,8 +58,12 @@ pub fn show(name: &str, size: u64) {
             return;
         };
 
-        let text = format!("Receiving {name} ({})…", human(size));
-        hud.label.setStringValue(&NSString::from_str(&text));
+        hud.panel.setFrameOrigin(target_origin(mtm));
+        hud.title.setStringValue(&NSString::from_str(name));
+        hud.subtitle.setStringValue(&NSString::from_str(&format!(
+            "from {device} · {}",
+            human(size)
+        )));
         hud.shown_at = Some(Instant::now());
         hud.deadline = Some(Instant::now() + AUTO_HIDE);
         // SAFETY: the sender argument is unused by NSProgressIndicator.
@@ -59,6 +72,7 @@ pub fn show(name: &str, size: u64) {
         tracing::info!(
             name,
             size,
+            device,
             visible = hud.panel.isVisible(),
             "showing transfer hud"
         );
@@ -107,13 +121,7 @@ pub fn tick() {
 
 impl Hud {
     fn new(mtm: MainThreadMarker) -> Option<Self> {
-        let screen = NSScreen::mainScreen(mtm)?;
-        let screen_frame = screen.frame();
-        let origin = NSPoint::new(
-            screen_frame.origin.x + (screen_frame.size.width - WIDTH) / 2.0,
-            screen_frame.origin.y + screen_frame.size.height - HEIGHT - TOP_MARGIN,
-        );
-        let frame = NSRect::new(origin, NSSize::new(WIDTH, HEIGHT));
+        let frame = NSRect::new(target_origin(mtm), NSSize::new(WIDTH, HEIGHT));
 
         let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
             NSPanel::alloc(mtm),
@@ -128,7 +136,7 @@ impl Hud {
         unsafe { panel.setReleasedWhenClosed(false) };
         panel.setLevel(NSStatusWindowLevel);
         panel.setOpaque(false);
-        panel.setBackgroundColor(Some(&NSColor::colorWithWhite_alpha(0.12, 0.9)));
+        panel.setBackgroundColor(Some(&NSColor::colorWithWhite_alpha(0.1, 0.85)));
         panel.setHasShadow(true);
         panel.setIgnoresMouseEvents(true);
         panel.setHidesOnDeactivate(false);
@@ -147,41 +155,106 @@ impl Hud {
         content.setState(NSVisualEffectState::Active);
         content.setWantsLayer(true);
         if let Some(layer) = content.layer() {
-            layer.setCornerRadius(12.0);
+            layer.setCornerRadius(CORNER_RADIUS);
             layer.setMasksToBounds(true);
+            layer.setBorderWidth(0.5);
+            layer.setBorderColor(Some(&NSColor::colorWithWhite_alpha(1.0, 0.12).CGColor()));
         }
         panel.setContentView(Some(&content));
 
-        let label = NSTextField::labelWithString(&NSString::from_str(""), mtm);
-        label.setFrame(NSRect::new(
-            NSPoint::new(16.0, 31.0),
-            NSSize::new(WIDTH - 32.0, 17.0),
+        let icon = NSImageView::initWithFrame(
+            NSImageView::alloc(mtm),
+            NSRect::new(
+                NSPoint::new(ICON_X, (HEIGHT - ICON_SIZE) / 2.0),
+                NSSize::new(ICON_SIZE, ICON_SIZE),
+            ),
+        );
+        if let Some(image) = download_icon() {
+            image.setTemplate(true);
+            icon.setImage(Some(&image));
+        }
+        icon.setContentTintColor(Some(&NSColor::whiteColor()));
+
+        let title = NSTextField::labelWithString(&NSString::from_str(""), mtm);
+        title.setFrame(NSRect::new(
+            NSPoint::new(TEXT_X, 33.0),
+            NSSize::new(TEXT_WIDTH, 17.0),
         ));
-        label.setTextColor(Some(&NSColor::whiteColor()));
-        label.setFont(Some(&NSFont::systemFontOfSize(13.0)));
+        title.setFont(Some(&NSFont::boldSystemFontOfSize(13.0)));
+        title.setTextColor(Some(&NSColor::whiteColor()));
+        title.setLineBreakMode(NSLineBreakMode::ByTruncatingMiddle);
+
+        let subtitle = NSTextField::labelWithString(&NSString::from_str(""), mtm);
+        subtitle.setFrame(NSRect::new(
+            NSPoint::new(TEXT_X, 16.0),
+            NSSize::new(TEXT_WIDTH, 15.0),
+        ));
+        subtitle.setFont(Some(&NSFont::systemFontOfSize(11.0)));
+        subtitle.setTextColor(Some(&NSColor::secondaryLabelColor()));
+        subtitle.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
 
         let progress = NSProgressIndicator::initWithFrame(
             NSProgressIndicator::alloc(mtm),
-            NSRect::new(NSPoint::new(16.0, 11.0), NSSize::new(WIDTH - 32.0, 12.0)),
+            NSRect::new(
+                NSPoint::new(WIDTH - SPINNER_RIGHT, (HEIGHT - SPINNER_SIZE) / 2.0),
+                NSSize::new(SPINNER_SIZE, SPINNER_SIZE),
+            ),
         );
-        progress.setStyle(NSProgressIndicatorStyle::Bar);
+        progress.setStyle(NSProgressIndicatorStyle::Spinning);
+        progress.setControlSize(NSControlSize::Small);
         progress.setIndeterminate(true);
         // A non-activating accessory app is usually inactive, which otherwise
         // freezes the indeterminate animation.
         // SAFETY: the setter only takes a boolean.
         unsafe { progress.setUsesThreadedAnimation(true) };
 
-        content.addSubview(&label);
+        content.addSubview(&icon);
+        content.addSubview(&title);
+        content.addSubview(&subtitle);
         content.addSubview(&progress);
 
         Some(Self {
             panel,
-            label,
+            title,
+            subtitle,
             progress,
             shown_at: None,
             deadline: None,
         })
     }
+}
+
+fn download_icon() -> Option<Retained<NSImage>> {
+    let symbol = NSString::from_str("arrow.down.doc.fill");
+    if let Some(image) = NSImage::imageWithSystemSymbolName_accessibilityDescription(&symbol, None)
+    {
+        return Some(image);
+    }
+    let fallback = NSString::from_str("doc");
+    NSImage::imageWithSystemSymbolName_accessibilityDescription(&fallback, None)
+}
+
+fn target_origin(mtm: MainThreadMarker) -> NSPoint {
+    let mouse = NSEvent::mouseLocation();
+    let screen_frame = NSScreen::screens(mtm)
+        .iter()
+        .map(|screen| screen.frame())
+        .find(|frame| point_in_rect(mouse, *frame))
+        .or_else(|| NSScreen::mainScreen(mtm).map(|screen| screen.frame()));
+    let Some(frame) = screen_frame else {
+        return NSPoint::new(0.0, 0.0);
+    };
+    NSPoint::new(
+        frame.origin.x + (frame.size.width - WIDTH) / 2.0,
+        frame.origin.y + frame.size.height - HEIGHT - TOP_MARGIN,
+    )
+}
+
+fn point_in_rect(point: NSPoint, rect: NSRect) -> bool {
+    point.x >= rect.origin.x
+        && point.x <= rect.origin.x + rect.size.width
+        && point.y >= rect.origin.y
+        && point.y <= rect.origin.y + rect.size.height
 }
 
 fn human(size: u64) -> String {
