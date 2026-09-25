@@ -61,7 +61,9 @@ struct PairingWindow {
     events: Receiver<UiEvent>,
     decision: Option<Sender<Decision>>,
     cancel: Option<Arc<AtomicBool>>,
+    listener_thread: Option<std::thread::JoinHandle<()>>,
     active: bool,
+    listening: bool,
 }
 
 thread_local! {
@@ -136,6 +138,10 @@ pub fn open(discovered: Vec<(DeviceId, SocketAddr)>, paired: Vec<DeviceId>, map:
         window.paired = paired;
         let entries = filter_nearby(discovered, window.local);
         window.refresh_nearby(mtm, entries);
+        tracing::info!(nearby = window.nearby.len(), "pairing window opened");
+        if !window.active && !window.listening {
+            start(window, false, None);
+        }
         window.window.makeKeyAndOrderFront(None);
         // An accessory app is normally inactive, so the text field will not accept
         // typing until the app is explicitly activated.
@@ -312,7 +318,9 @@ impl PairingWindow {
             events,
             decision: None,
             cancel: None,
+            listener_thread: None,
             active: false,
+            listening: false,
         };
         state.set_interactive(true, false, false);
         state
@@ -392,6 +400,7 @@ impl PairingWindow {
     fn handle(&mut self, event: UiEvent) {
         match event {
             UiEvent::Code(code) => {
+                tracing::info!("pairing code shown");
                 self.code.setStringValue(&NSString::from_str(&code));
                 self.set_status("Compare this code on both devices, then confirm.");
                 self.set_interactive(false, true, true);
@@ -438,6 +447,10 @@ impl PairingWindow {
     }
 
     fn finish(&mut self) {
+        if let Some(handle) = self.listener_thread.take() {
+            let _ = handle.join();
+        }
+        self.listening = false;
         self.active = false;
         self.decision = None;
         self.cancel = None;
@@ -445,14 +458,31 @@ impl PairingWindow {
     }
 }
 
+fn stop_listener(window: &mut PairingWindow) {
+    if let Some(cancel) = &window.cancel {
+        cancel.store(true, Ordering::Relaxed);
+    }
+    if let Some(decision) = &window.decision {
+        let _ = decision.send(Decision::Abort);
+    }
+    if let Some(handle) = window.listener_thread.take() {
+        let _ = handle.join();
+    }
+    window.listening = false;
+    window.active = false;
+}
+
 fn start(window: &mut PairingWindow, initiator: bool, host: Option<String>) {
-    if window.active {
+    if window.active && !window.listening {
         return;
     }
     let host = host.unwrap_or_else(|| window.host.stringValue().to_string().trim().to_string());
     if initiator && host.is_empty() {
         window.set_status("Enter the other device's IP address first.");
         return;
+    }
+    if window.listening {
+        stop_listener(window);
     }
 
     let (events_tx, events_rx) = mpsc::channel();
@@ -464,18 +494,23 @@ fn start(window: &mut PairingWindow, initiator: bool, host: Option<String>) {
     window.cancel = Some(Arc::clone(&cancel));
     window.active = true;
     window.code.setStringValue(&NSString::from_str(""));
-    window.set_interactive(false, false, true);
 
     if initiator {
+        window.set_interactive(false, false, true);
         window.set_status(&format!("Connecting to {host}…"));
         std::thread::spawn(move || run_initiator(host, events_tx, decision_rx));
     } else {
+        // Pair stays enabled so the user can switch to initiating while we listen.
+        window.set_interactive(true, false, true);
         window.set_status(&format!("Waiting for a device on port {PAIRING_PORT}…"));
-        std::thread::spawn(move || run_responder(events_tx, decision_rx, cancel));
+        window.listening = true;
+        let handle = std::thread::spawn(move || run_responder(events_tx, decision_rx, cancel));
+        window.listener_thread = Some(handle);
     }
 }
 
 fn run_initiator(host: String, events: Sender<UiEvent>, decision: Receiver<Decision>) {
+    tracing::info!(host = %host, "pairing initiator connecting");
     match pairing::start_pair(&host) {
         Ok(started) => {
             let _ = events.send(UiEvent::Code(started.code.clone()));
@@ -485,6 +520,7 @@ fn run_initiator(host: String, events: Sender<UiEvent>, decision: Receiver<Decis
                         let _ = events.send(UiEvent::Paired(peer));
                     }
                     Err(err) => {
+                        tracing::warn!(%err, "pairing confirm failed");
                         let _ = events.send(UiEvent::Failed(err.to_string()));
                     }
                 },
@@ -495,6 +531,7 @@ fn run_initiator(host: String, events: Sender<UiEvent>, decision: Receiver<Decis
             }
         }
         Err(err) => {
+            tracing::warn!(%err, host = %host, "pairing initiator failed");
             let _ = events.send(UiEvent::Failed(err.to_string()));
         }
     }
@@ -502,8 +539,12 @@ fn run_initiator(host: String, events: Sender<UiEvent>, decision: Receiver<Decis
 
 fn run_responder(events: Sender<UiEvent>, decision: Receiver<Decision>, cancel: Arc<AtomicBool>) {
     let listener = match pairing::bind_pair_listener() {
-        Ok(listener) => listener,
+        Ok(listener) => {
+            tracing::info!(port = PAIRING_PORT, "pairing responder listening");
+            listener
+        }
         Err(err) => {
+            tracing::warn!(%err, "pairing responder bind failed");
             let _ = events.send(UiEvent::Failed(err.to_string()));
             return;
         }
@@ -515,6 +556,7 @@ fn run_responder(events: Sender<UiEvent>, decision: Receiver<Decision>, cancel: 
             return;
         }
         Err(err) => {
+            tracing::warn!(%err, "pairing responder accept failed");
             let _ = events.send(UiEvent::Failed(err.to_string()));
             return;
         }
@@ -526,6 +568,7 @@ fn run_responder(events: Sender<UiEvent>, decision: Receiver<Decision>, cancel: 
                 let _ = events.send(UiEvent::Paired(peer));
             }
             Err(err) => {
+                tracing::warn!(%err, "pairing responder confirm failed");
                 let _ = events.send(UiEvent::Failed(err.to_string()));
             }
         },
@@ -567,6 +610,7 @@ fn on_unpair(sender: &AnyObject) {
         };
         match pairing::forget_peer(id) {
             Ok(name) => {
+                tracing::info!(%name, "unpaired device");
                 window.paired.retain(|paired| *paired != id);
                 window.set_status(&format!(
                     "Unpaired {name}. Restart Continuum to disconnect. Also unpair there if you want to fully remove it."
