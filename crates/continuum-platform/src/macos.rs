@@ -3,7 +3,8 @@ use objc2::runtime::ProtocolObject;
 use objc2_app_kit::{
     NSPasteboard, NSPasteboardAccessBehavior, NSPasteboardItem, NSPasteboardWriting,
 };
-use objc2_foundation::{NSArray, NSData, NSString};
+use objc2_foundation::{NSArray, NSData, NSString, NSURL};
+use std::path::PathBuf;
 
 use continuum_core::{ClipItem, Representation, PNG_MIME, TIFF_MIME};
 
@@ -12,15 +13,14 @@ use crate::files;
 use crate::mime;
 
 pub struct MacClipboard {
-    last_change_count: isize,
+    last_change_count: Option<isize>,
 }
 
 impl MacClipboard {
     #[must_use]
     pub fn new() -> Self {
-        let count = NSPasteboard::generalPasteboard().changeCount();
         Self {
-            last_change_count: count,
+            last_change_count: None,
         }
     }
 
@@ -50,10 +50,10 @@ impl ClipboardBackend for MacClipboard {
     fn read(&mut self) -> Result<Option<Vec<ClipItem>>, ClipboardError> {
         let pasteboard = NSPasteboard::generalPasteboard();
         let count = pasteboard.changeCount();
-        if count == self.last_change_count {
+        if self.last_change_count == Some(count) {
             return Ok(None);
         }
-        self.last_change_count = count;
+        self.last_change_count = Some(count);
         read_pasteboard(&pasteboard)
     }
 
@@ -70,7 +70,7 @@ impl ClipboardBackend for MacClipboard {
             });
         if files_only {
             write_files(&pasteboard, items)?;
-            self.last_change_count = pasteboard.changeCount();
+            self.last_change_count = Some(pasteboard.changeCount());
             return Ok(());
         }
 
@@ -108,7 +108,7 @@ impl ClipboardBackend for MacClipboard {
             ));
         }
 
-        self.last_change_count = pasteboard.changeCount();
+        self.last_change_count = Some(pasteboard.changeCount());
         Ok(())
     }
 }
@@ -129,7 +129,7 @@ fn read_pasteboard(pasteboard: &NSPasteboard) -> Result<Option<Vec<ClipItem>>, C
             let url_type = NSString::from_str("public.file-url");
             if let Some(data) = item.dataForType(&url_type) {
                 let url = String::from_utf8_lossy(&data.to_vec()).into_owned();
-                if let Some(path) = files::parse_uri_list(url.as_bytes()).into_iter().next() {
+                if let Some(path) = resolve_file_url(&url) {
                     if let Some((name, content)) = files::read_file(&path) {
                         result.push(ClipItem::new(vec![files::encode(&name, &content)])?);
                         continue;
@@ -178,6 +178,15 @@ fn tiff_to_png(tiff: &[u8]) -> Option<Vec<u8>> {
         .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
         .ok()?;
     Some(png)
+}
+
+/// Resolves a pasteboard file URL to a filesystem path. Finder stores file-reference URLs
+/// (`file:///.file/id=…`), which are not paths until resolved via `filePathURL`.
+fn resolve_file_url(url: &str) -> Option<PathBuf> {
+    let string = NSString::from_str(url);
+    let nsurl = NSURL::URLWithString(&string)?;
+    let path_url = nsurl.filePathURL().unwrap_or(nsurl);
+    path_url.path().map(|path| PathBuf::from(path.to_string()))
 }
 
 fn write_files(pasteboard: &NSPasteboard, items: &[ClipItem]) -> Result<(), ClipboardError> {
