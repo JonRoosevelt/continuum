@@ -61,15 +61,17 @@ scripts/install.sh        # build → ~/.local/bin → install service
 
 ## Pair two devices
 
-```sh
-# on device A
-continuum pair-listen
-# on device B
-continuum pair <A-host>
-```
+Open the tray menu → **Pair device…**. On the other device either run
+`continuum pair-listen`, or click **Wait for device** in its tray. Both sides
+show the same 6-digit code; confirm on each. The key is pinned and the devices
+reconnect automatically from then on.
 
-Both sides print the same 6-digit verification code; confirm on each. Each
-device pins the other's public key into its config and connects on next start.
+The same works headless:
+
+```sh
+continuum pair-listen        # on device A
+continuum pair <A-host>      # on device B
+```
 
 ## CLI
 
@@ -96,7 +98,7 @@ device pins the other's public key into its config and connects on next start.
   "listen": "0.0.0.0:8770",
   "download_dir": null,
   "peers": [
-    { "name": "desktop", "address": "100.x.y.z:8770", "public_key": "<64 hex chars>" }
+    { "name": "desktop", "address": null, "public_key": "<64 hex chars>" }
   ]
 }
 ```
@@ -104,6 +106,11 @@ device pins the other's public key into its config and connects on next start.
 `download_dir` is where received files land (`null` → `~/Downloads/Continuum`); a
 leading `~` and relative paths resolve against your home directory. `continuum
 status` prints the effective folder.
+
+`address` is optional: on the same LAN devices find each other automatically via
+mDNS (`_continuum._tcp`), so pairing needs no IP and the connection survives IP
+changes. Set it to a fixed `host:port` only as a fallback — e.g. when multicast is
+blocked, or over a VPN such as Tailscale (mDNS does not traverse a tailnet).
 
 ## Security
 

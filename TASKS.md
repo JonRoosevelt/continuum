@@ -33,7 +33,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 - [x] Identity: X25519 static keypair, `DeviceId` = BLAKE3(pubkey), persisted 0600 at the config dir
 - [x] Noise IK session over length-prefixed TCP frames (`snow`), with pinned-key peer verification
 - [x] Peer connection manager: both sides dial, duplicate connections resolved by device id, keepalive (ping + idle timeout), reconnect backoff
-- [ ] mDNS discovery (`mdns-sd`, in-process — no Avahi dep) advertising a rotating ephemeral id; manual IP:port fallback (manual works today)
+- [x] mDNS discovery (`mdns-sd`, in-process) via `_continuum._tcp` with DeviceId in TXT; verified cross-machine on a LAN; static `address` kept as fallback
 - [ ] Reconnect backoff jitter
 - [ ] OS keychain / libsecret for the identity key (currently 0600 file); periodic rekey
 
