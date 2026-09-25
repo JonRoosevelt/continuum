@@ -10,6 +10,8 @@ mod monitor;
 mod net;
 mod notify;
 mod pairing;
+#[cfg(all(target_os = "linux", feature = "tray"))]
+mod pairing_ui;
 #[cfg(all(target_os = "macos", feature = "tray"))]
 mod pairing_window;
 mod service;

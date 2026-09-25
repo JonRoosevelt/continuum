@@ -6,6 +6,7 @@ use std::time::Duration;
 use gtk::glib;
 
 use crate::net::NetEvent;
+use crate::pairing_ui;
 use crate::tray::{TrayAction, TrayApp};
 use crate::Core;
 
@@ -71,6 +72,7 @@ fn tick(app: &Rc<RefCell<App>>, receiver: &mpsc::Receiver<NetEvent>) {
             tracing::warn!(%err, "clipboard poll failed");
         }
     }
+    pairing_ui::poll();
     update_status(app);
 }
 
@@ -83,10 +85,9 @@ fn apply_action(app: &Rc<RefCell<App>>, action: TrayAction) {
             app.tray.set_paused(paused);
         }
         TrayAction::SendNow => app.borrow().core.send_now(),
-        // The Linux pairing UI is a follow-up; the daemon can already be paired from
-        // the other device or via the `continuum pair` CLI.
         TrayAction::Pair => {
-            tracing::info!("run `continuum pair <host>` or `continuum pair-listen` to pair")
+            let app = app.borrow();
+            pairing_ui::open(app.core.discovered_map(), app.core.paired_device_ids());
         }
         TrayAction::Quit => app.borrow_mut().quit = true,
         TrayAction::None => {}
