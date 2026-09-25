@@ -63,6 +63,8 @@ pub fn run() {
                 }
             },
             Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
+                #[cfg(target_os = "macos")]
+                crate::hud::tick();
                 if let Some(app) = app.as_mut() {
                     if let Err(err) = app.core.poll() {
                         tracing::warn!(%err, "clipboard poll failed");

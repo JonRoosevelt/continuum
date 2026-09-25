@@ -1,6 +1,8 @@
 mod config;
 #[cfg(feature = "tray")]
 mod gui;
+#[cfg(all(target_os = "macos", feature = "tray"))]
+mod hud;
 mod monitor;
 mod net;
 mod notify;
@@ -14,8 +16,6 @@ use std::sync::{mpsc, Arc};
 use continuum_core::{ClipboardItem, DeviceId, Version};
 use continuum_net::{Identity, Message};
 use monitor::Monitor;
-
-const LARGE_TRANSFER: u64 = 2 * 1024 * 1024;
 
 pub(crate) struct Core {
     pub(crate) monitor: Monitor,
@@ -110,11 +110,9 @@ impl Core {
         match event {
             net::NetEvent::Clipboard(item) => self.apply_remote(item),
             net::NetEvent::TransferStart { from, name, size } => {
-                if size >= LARGE_TRANSFER {
-                    notify::receiving(&name, size, from);
-                }
+                notify::start(&name, size, from);
             }
-            net::NetEvent::TransferDone { from, name } => notify::received(&name, from),
+            net::NetEvent::TransferDone { from, name } => notify::finish(&name, from),
             net::NetEvent::PeerUp(device) => self.announce_to(device),
             net::NetEvent::PeerDown(device) => {
                 tracing::info!(device = %device.short(), "peer offline");

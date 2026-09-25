@@ -1,17 +1,33 @@
 use continuum_core::DeviceId;
 
-pub fn receiving(name: &str, size: u64, from: DeviceId) {
-    show(&format!(
-        "Receiving {name} ({}) from {}…",
-        human(size),
-        from.short()
-    ));
+pub fn start(name: &str, size: u64, from: DeviceId) {
+    on_start(name, size, from);
 }
 
-pub fn received(name: &str, from: DeviceId) {
+pub fn finish(name: &str, from: DeviceId) {
+    on_finish(name, from);
+}
+
+#[cfg(target_os = "linux")]
+const LARGE_TRANSFER: u64 = 2 * 1024 * 1024;
+
+#[cfg(target_os = "linux")]
+fn on_start(name: &str, size: u64, from: DeviceId) {
+    if size >= LARGE_TRANSFER {
+        show(&format!(
+            "Receiving {name} ({}) from {}…",
+            human(size),
+            from.short()
+        ));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn on_finish(name: &str, from: DeviceId) {
     show(&format!("Received {name} from {}", from.short()));
 }
 
+#[cfg(target_os = "linux")]
 fn human(size: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
@@ -24,6 +40,7 @@ fn human(size: u64) -> String {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn show(message: &str) {
     tracing::info!(%message, "notification");
     spawn_notification(message);
@@ -60,16 +77,28 @@ fn hyprland_signature() -> Option<String> {
         .find_map(|entry| entry.file_name().into_string().ok())
 }
 
-#[cfg(target_os = "macos")]
-fn spawn_notification(message: &str) {
-    use std::process::Command;
+#[cfg(all(target_os = "macos", feature = "tray"))]
+fn on_start(name: &str, size: u64, _from: DeviceId) {
+    crate::hud::show(name, size);
+}
 
-    let script = format!(
-        "display notification \"{}\" with title \"Continuum\"",
-        message.replace('"', "'")
-    );
-    let _ = Command::new("osascript").args(["-e", &script]).spawn();
+#[cfg(all(target_os = "macos", feature = "tray"))]
+fn on_finish(_name: &str, _from: DeviceId) {
+    crate::hud::hide();
+}
+
+#[cfg(all(target_os = "macos", not(feature = "tray")))]
+fn on_start(name: &str, size: u64, from: DeviceId) {
+    tracing::info!(name, size, from = %from.short(), "receiving transfer");
+}
+
+#[cfg(all(target_os = "macos", not(feature = "tray")))]
+fn on_finish(name: &str, from: DeviceId) {
+    tracing::info!(name, from = %from.short(), "transfer complete");
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn spawn_notification(_message: &str) {}
+fn on_start(_name: &str, _size: u64, _from: DeviceId) {}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn on_finish(_name: &str, _from: DeviceId) {}
