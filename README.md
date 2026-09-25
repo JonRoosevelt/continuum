@@ -73,6 +73,10 @@ continuum pair-listen        # on device A
 continuum pair <A-host>      # on device B
 ```
 
+On Linux the firewall must allow inbound TCP **8770** (sync) and **8771** (pairing)
+— e.g. `sudo ufw allow 8770/tcp && sudo ufw allow 8771/tcp`. Devices find each
+other via mDNS, but a firewall that drops inbound TCP will prevent them connecting.
+
 ## CLI
 
 | command | purpose |

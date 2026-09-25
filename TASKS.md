@@ -79,6 +79,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · blocked items note the 
 - [x] Runtime-verified the Linux X11 backend via XWayland: file read/write (text/uri-list + x-special/gnome-copied-files) using xclip
 
 ## Later (post-v1)
+- [ ] Linux: `install-service` should add firewall rules (ufw/firewalld) for TCP 8770/8771 when active; today this is manual and blocks inbound pairing/connections
+
 - [x] Lazy/promise file transfer — decided against: it is macOS-receiver-only (paste-time data provider) and Linux cannot defer, since the file manager copies a real file at paste. Eager transfer retained.
 
 
