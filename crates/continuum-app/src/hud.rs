@@ -136,7 +136,9 @@ impl Hud {
         unsafe { panel.setReleasedWhenClosed(false) };
         panel.setLevel(NSStatusWindowLevel);
         panel.setOpaque(false);
-        panel.setBackgroundColor(Some(&NSColor::colorWithWhite_alpha(0.1, 0.85)));
+        // A clear window background so only the rounded effect view shows; an opaque
+        // one leaves square corners poking out behind the rounded blur.
+        panel.setBackgroundColor(Some(&NSColor::clearColor()));
         panel.setHasShadow(true);
         panel.setIgnoresMouseEvents(true);
         panel.setHidesOnDeactivate(false);
